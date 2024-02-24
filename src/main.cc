@@ -16,8 +16,8 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
     constexpr std::size_t To = 166;
 
     for (std::size_t i = From; i < To; ++i) {
-        const auto meas = read_measurement(i, args[1]);
-        fmt::println("cloud size: {}", meas.cloud.size());
+        const auto cloud = read_file<lidar_data_parser>(std::filesystem::path(args[1]).string()).value();
+        fmt::println("cloud size: {}", cloud.size());
     }
 
     return EXIT_SUCCESS;
