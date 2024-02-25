@@ -10,6 +10,7 @@ target_include_directories(${EXEC_NAME} PUBLIC
 
 target_link_libraries(${EXEC_NAME} PUBLIC
     fmt::fmt-header-only
+    nova
     # ${OpenCV_LIBS}
     # opencv_gapi
     ${PCL_LIBRARIES}
