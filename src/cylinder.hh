@@ -5,14 +5,13 @@
 
 #include <Eigen/Core>
 #include <Eigen/Dense>
-#include <fmt/core.h>
 #include <nova/vec.h>
 #include <nova/random.h>
 #include <nova/types.h>
+#include <spdlog/spdlog.h>
 
 #include <cmath>
 #include <ranges>
-#include <iostream>
 
 
 [[nodiscard]] auto estimate_cylinder_min(const auto& points)
@@ -98,13 +97,13 @@
 [[nodiscard]] auto estimate_cylinder_RANSAC(const auto& points, float threshold, std::size_t iter)
         -> nova::Vec4f
 {
-    constexpr auto RMax = 1.0f;
-    constexpr auto RMin = 0.1f;
+    constexpr auto RMax = 0.35f;
+    constexpr auto RMin = 0.25f;
     const auto points_size = points.size();
     std::size_t best_sample_inlier_num = 0;
     nova::Vec4f best_cylinder;
 
-    fmt::println("RANDOM ENGINE SEED: {}", nova::random().seed());
+    spdlog::info("RANDOM ENGINE SEED: {}", nova::random().seed());
 
     for (std::size_t i = 0; i < iter; ++i) {
         const auto p1 = nova::random().choice(points);
@@ -118,12 +117,13 @@
         const auto sample_result = calculate_RANSAC_diffs(points, sample_cylinder, threshold);
 
         if (sample_result.num_inliers > best_sample_inlier_num
+            && sample_result.num_inliers > 80
             && sample_cylinder.w() < RMax
-            && sample_cylinder.w() < RMin
+            && sample_cylinder.w() > RMin
         ) {
             best_sample_inlier_num = sample_result.num_inliers;
             best_cylinder = sample_cylinder;
-            fmt::println("Inlier num. update: {}\t\tradius: {}", best_sample_inlier_num, best_cylinder.w());
+            spdlog::info("Inlier num. update: {}\t\tradius: {}", best_sample_inlier_num, best_cylinder.w());
         }
     }
 
