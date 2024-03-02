@@ -1,7 +1,8 @@
 set(EXEC_NAME ph)
 
 add_executable(${EXEC_NAME}
-    main.cc
+    # main.cc
+    test.cc
 )
 
 target_include_directories(${EXEC_NAME} PUBLIC
@@ -9,10 +10,13 @@ target_include_directories(${EXEC_NAME} PUBLIC
 )
 
 target_link_libraries(${EXEC_NAME} PUBLIC
-    fmt::fmt-header-only
-    nova
+    # Eigen3::Eigen
+    # fmt::fmt-header-only
+    # nova
     # ${OpenCV_LIBS}
     # opencv_gapi
+    # PCL
+    pcl::PCL_COMMON_LIBRARIES
     ${PCL_LIBRARIES}
 )
 
