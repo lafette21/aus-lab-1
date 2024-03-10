@@ -124,7 +124,7 @@
         ) {
             best_sample_inlier_num = sample_result.num_inliers;
             best_cylinder = sample_cylinder;
-            spdlog::info("Inlier num. update: {}\t\tradius: {}", best_sample_inlier_num, best_cylinder.w());
+            spdlog::info("Inlier num. update: {}\t\tradius: {} m", best_sample_inlier_num, best_cylinder.w());
         }
     }
 

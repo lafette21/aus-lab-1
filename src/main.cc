@@ -14,7 +14,6 @@
 #include <array>
 #include <cstdlib>
 #include <future>
-#include <queue>
 #include <ranges>
 #include <span>
 
@@ -54,6 +53,23 @@ inline auto& init(const std::string& name) {
     return {
         cylinder,
         rest
+    };
+}
+
+[[nodiscard]] auto calc_curr_pose(
+    float prev_velocity,
+    float prev_angular_velocity,
+    float prev_x,
+    float prev_y,
+    float prev_theta,
+    float prev_side_slipping = 0
+)
+        -> std::tuple<float, float, float>
+{
+    return {
+        prev_x + prev_velocity * std::cos(prev_theta + prev_angular_velocity / 2 + prev_side_slipping),
+        prev_y + prev_velocity * std::sin(prev_theta + prev_angular_velocity / 2 + prev_side_slipping),
+        prev_theta + prev_angular_velocity
     };
 }
 
@@ -100,28 +116,65 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
                     | std::views::transform([](const auto& arg) { return std::string_view {arg}; });
 
     constexpr std::size_t From = 165;
-    constexpr std::size_t To = 176;
+    constexpr std::size_t To = 170;
+    constexpr std::size_t Speed = 1;
 
-    std::queue<pcl::PointCloud<pcl::PointXYZRGB>> clouds;
+    std::vector<pcl::PointCloud<pcl::PointXYZRGB>> clouds;
+    clouds.reserve(To - From);
 
     spdlog::info("Reading cloud(s)");
 
     for (std::size_t i = From; i < To; ++i) {
         const auto cloud = read_file<lidar_data_parser>(
-            (std::filesystem::path(args[1]) / fmt::format("test_fn{}.xyz", i)).string()
+            (std::filesystem::path(args[1]) / fmt::format("test_fn{}.xyz", i + (From - i) * Speed * 20)).string()
         ).value();
-        clouds.push(cloud);
+        clouds.push_back(cloud);
     }
 
     spdlog::info("Read {} cloud(s)", clouds.size());
+
+    std::vector<float> velocities;
+    velocities.reserve(To - From);
+
+    for (std::size_t i = 0; i < To - From + 1; ++i) {
+        velocities.push_back(Speed);
+    }
+
+    std::vector<float> angular_velocities;
+    angular_velocities.reserve(To - From);
+
+    for (std::size_t i = 0; i < To - From + 1; ++i) {
+        angular_velocities.push_back(0);
+    }
+
+    std::vector<nova::Vec3f> poses;
+    poses.reserve(To - From);
+    poses.emplace_back(0, 0, 0);
+
     spdlog::info("Processing cloud(s)");
 
     pcl::PointCloud<pcl::PointXYZRGB> out_cloud;
 
-    while (not clouds.empty()) {
-        const auto cloud = clouds.front();
-        clouds.pop();
+    for (const auto& [idx, cloud] : std::views::enumerate(clouds)) {
         spdlog::info("Cloud size: {}", cloud.size());
+
+        // const auto [x, y, theta] = calc_curr_pose(
+            // velocities[static_cast<std::size_t>((static_cast<int>(idx) - 1) % static_cast<int>(velocities.size()))],
+            // angular_velocities[static_cast<std::size_t>((static_cast<int>(idx) - 1) % static_cast<int>(angular_velocities.size()))],
+            // poses[static_cast<std::size_t>((static_cast<int>(idx) - 1) % static_cast<int>(poses.size()))].x(),
+            // poses[static_cast<std::size_t>((static_cast<int>(idx) - 1) % static_cast<int>(poses.size()))].y(),
+            // poses[static_cast<std::size_t>((static_cast<int>(idx) - 1) % static_cast<int>(poses.size()))].z()
+        // );
+        const auto [x, y, theta] = calc_curr_pose(
+            velocities[static_cast<std::size_t>(idx)],
+            angular_velocities[static_cast<std::size_t>(idx)],
+            poses[static_cast<std::size_t>(idx)].x(),
+            poses[static_cast<std::size_t>(idx)].y(),
+            poses[static_cast<std::size_t>(idx)].z()
+        );
+        poses.emplace_back(x, y, theta);
+
+        spdlog::info("Current pose: x={} y={} theta={}", x, y, theta);
 
         pcl::PointCloud<pcl::PointXYZRGB> tmp_cloud;
         pcl::VoxelGrid<pcl::PointXYZRGB> vg;
@@ -164,10 +217,10 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
         Eigen::Affine3f transform = Eigen::Affine3f::Identity();
 
         // Define a translation of 10 meters on the x axis.
-        transform.translation() << 10.0, 0.0, 0.0;
+        transform.translation() << x, y, 0.0;
 
         // The same rotation matrix as before; theta radians around Z axis
-        transform.rotate(Eigen::AngleAxisf(0, Eigen::Vector3f::UnitZ()));
+        transform.rotate(Eigen::AngleAxisf(theta, Eigen::Vector3f::UnitZ()));
 
         pcl::transformPointCloud(cylinders, cylinders, transform);
 
