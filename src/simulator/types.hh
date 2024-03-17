@@ -15,23 +15,8 @@ enum class object_type {
     plane,
 };
 
-struct error {
-    std::string msg;
-    operator std::string() { return msg; }
-};
-
-struct def_parser {
-    [[nodiscard]] std::string operator()(std::ifstream&& iF) {
-        std::stringstream ss;
-        for (std::string line; std::getline(iF, line); ) {
-            ss << line << '\n';
-        }
-        return ss.str();
-    }
-};
-
 struct map_parser {
-    [[nodiscard]] std::vector<std::pair<object_type, std::vector<nova::Vec3f>>> operator()(std::ifstream&& iF) {
+    [[nodiscard]] std::vector<std::pair<object_type, std::vector<nova::Vec3f>>> operator()(std::istream& iF) {
         using namespace std::string_literals;
         std::vector<std::pair<object_type, std::vector<nova::Vec3f>>> result;
         for (std::string line; std::getline(iF, line); ) {

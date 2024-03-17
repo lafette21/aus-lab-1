@@ -1,20 +1,21 @@
-#include "utils.hh"
 #include "types.hh"
 
 #include <fmt/chrono.h>
 #include <fmt/format.h>
-#include <nlohmann/json.hpp>
+#include <nova/io.h>
+#include <nova/json.h>
 #include <nova/vec.h>
 #include <nova/utils.h>
 #include <spdlog/spdlog.h>
 
 #include <fstream>
+#include <numbers>
 #include <ranges>
 #include <span>
 #include <string>
 #include <vector>
 
-using json = nlohmann::json;
+using json = nova::json;
 
 
 inline auto& init(const std::string& name) {
@@ -26,27 +27,8 @@ inline auto& init(const std::string& name) {
     return logger;
 }
 
-std::vector<float> linspace(float start, float stop, std::size_t num = 100, bool endpoint = true) {
-    std::vector<float> result;
-    result.reserve(num);
-
-    float step;
-
-    if (endpoint) {
-        step = (stop - start) / static_cast<float>(num - 1);
-    } else {
-        step = (stop - start) / static_cast<float>(num);
-    }
-
-    for (std::size_t i = 0; i < num; ++i) {
-        result.push_back(start + static_cast<float>(i) * step);
-    }
-
-    return result;
-}
-
 float deg2rad(float degrees) {
-    return degrees * (M_PIf / 180.0f);
+    return degrees * (std::numbers::pi_v<float> / 180.0f);
 }
 
 auto calc_normal_vec(const std::vector<nova::Vec3f>& points)
@@ -196,9 +178,9 @@ public:
     lidar(const json& config, const auto& objects)
         : m_config(config), m_objects(objects)
     {
-        m_ang_res_h = static_cast<float>(m_config["rpm"]["value"]) / 60 * 360 * static_cast<float>(m_config["firing_cycle"]);
-        m_angles_hor = linspace(0, m_config["fov_h"], static_cast<std::size_t>(static_cast<float>(m_config["fov_h"]) / m_ang_res_h), false);
-        m_angles_ver = linspace(-static_cast<float>(m_config["fov_v"]) / 2, static_cast<float>(m_config["fov_v"]) / 2, m_config["channels"], true);
+        m_ang_res_h = m_config.lookup<float>("rpm.value") / 60 * 360 * m_config.lookup<float>("firing_cycle");
+        m_angles_hor = nova::linspace(nova::range{ 0.f, m_config.lookup<float>("fov_h") }, static_cast<std::size_t>(m_config.lookup<float>("fov_h") / m_ang_res_h), false);
+        m_angles_ver = nova::linspace(nova::range{ -m_config.lookup<float>("fov_v") / 2, m_config.lookup<float>("fov_v") / 2 }, m_config.lookup<std::size_t>("channels"), true);
     }
 
     auto string() {
@@ -272,17 +254,16 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
     [[maybe_unused]] auto& logger = init("logger");
 
     const auto args = std::span<char*>(argv, static_cast<std::size_t>(argc))
-                    | std::views::transform([](const auto& arg) { return std::string_view {arg}; });
+                    | std::views::transform([](const auto& arg) { return std::string_view{ arg }; });
 
-    const auto objects = read_file<map_parser>(std::filesystem::path(args[2]).string()).value();
+    const auto objects = nova::read_file<map_parser>(std::filesystem::path(args[2]).string()).value();
 
     // for (const auto& [type, data] : objects) {
         // fmt::println("{}", std::to_underlying<object_type>(type));
     // }
 
-    std::ifstream iF(std::string{args[1]});
-    json config = json::parse(iF);
-    lidar lidar { config["vlp_16"], objects };
+    json config(nova::read_file(std::filesystem::path(args[1]).string()).value());
+    lidar lidar { config.at("vlp_16"), objects };
 
     spdlog::info(lidar.string());
 
