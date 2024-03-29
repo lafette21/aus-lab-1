@@ -30,6 +30,21 @@ struct plane {
 
 using primitive = std::variant<cylinder, plane>;
 
+struct hit_record {
+    nova::Vec3f point;
+    nova::Vec3f normal;
+    float t;
+};
+
+struct ray {
+    nova::Vec3f origin;
+    nova::Vec3f direction;
+
+    constexpr nova::Vec3f at(float distance) const {
+        return origin + direction * distance;
+    }
+};
+
 std::istream& operator>>(std::istream& is, nova::Vec3f& vec) {
     is >> vec.x() >> vec.y() >> vec.z();
     return is;
@@ -50,7 +65,7 @@ struct map_parser {
                 ret.push_back(plane);
             } else if (obj_type == "cylinder"s) {
                 cylinder cyl;
-                ss >> cyl.center;
+                ss >> cyl.center >> cyl.axis >> cyl.radius >> cyl.height;
                 ret.push_back(cyl);
             }
         }

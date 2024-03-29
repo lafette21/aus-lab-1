@@ -51,114 +51,6 @@ auto calc_normal_vec(const std::vector<nova::Vec3f>& points)
     return normal_vec;
 }
 
-auto line_plane_intersection(
-    const nova::Vec3f& point,
-    const nova::Vec3f& vec,
-    const nova::Vec3f& plane_normal,
-    const nova::Vec3f& plane_point,
-    const nova::Vec3f& min,
-    const nova::Vec3f& max
-)
-        -> std::vector<nova::Vec3f>
-{
-    // Calculate the dot product of the plane normal and the line direction vector
-    const auto dot_prod = nova::dot(plane_normal, vec);
-
-    // Check if the line is parallel to the plane
-    if (std::abs(dot_prod) < 1e-6f) {
-        return {};
-    }
-
-    // Calculate the vector from a point on the plane to the line's point of origin
-    const auto plane_to_line = point - plane_point;
-
-    // Calculate the distance along the line to the intersection point
-    const auto t = -nova::dot(plane_to_line, plane_normal) / dot_prod;
-
-    // Calculate the intersection point
-    const auto intersection = point + vec * t;
-
-    // Check if the intersection point lies outside the bounds of the finite plane
-    if (not (min.x() <= intersection.x() and intersection.x() <= max.x()
-        and min.y() <= intersection.y() and intersection.y() <= max.y()
-        and min.z() <= intersection.z() and intersection.z() <= max.z())) {
-        return {};
-    }
-
-    return { intersection };
-}
-
-auto line_cylinder_intersection(
-    const nova::Vec3f& point,
-    const nova::Vec3f& vec,
-    const nova::Vec3f& center,
-    const nova::Vec3f& axis,
-    float radius
-)
-        -> std::vector<nova::Vec3f>
-{
-    // Translate the line and cylinder center to the origin
-    const auto point_cyl = point - center;
-
-    // Calculate the direction vector of the line in the cylinder coordinate system
-    const auto vec_cyl = vec - axis * nova::dot(vec, axis);
-
-    // Calculate the coefficients for the quadratic equation
-    const auto a = vec_cyl.x() * vec_cyl.x() + vec_cyl.y() * vec_cyl.y();
-    const auto b = 2 * (point_cyl.x() * vec_cyl.x() + point_cyl.y() * vec_cyl.y());
-    const auto c = point_cyl.x() * point_cyl.x() + point_cyl.y() * point_cyl.y() - radius * radius;
-
-    // Calculate the discriminant
-    const auto discriminant = b * b - 4 * a * c;
-
-    // Check if there are any real roots (intersection points)
-    if (discriminant < 0) {
-        return {};  // No intersection
-    } else if (discriminant == 0) {
-        // One intersection point
-        const auto t = -b / (2 * a);
-
-        return {
-            point + vec * t
-        };
-    }
-
-    // Two intersection points
-    const auto t1 = (-b + std::sqrt(discriminant)) / (2 * a);
-    const auto t2 = (-b - std::sqrt(discriminant)) / (2 * a);
-
-    return {
-        point + vec * t1,
-        point + vec * t2
-    };
-}
-
-auto intersections(const nova::Vec3f& point, const nova::Vec3f& vec, const primitive& obj)
-        -> std::vector<nova::Vec3f>
-{
-    const auto ret = std::visit(lambdas{
-        [point, vec](const cylinder& p) {
-            return line_cylinder_intersection(point, vec, p.center, { 0, 0, 1 }, 0.35f);
-        },
-        [point, vec](const plane& p) {
-            const auto points = std::vector<nova::Vec3f>{ p.p0, p.p1, p.p2, p.p3 };
-            const auto max_x = std::ranges::max(points, [](const auto& lhs, const auto& rhs) { return lhs.x() < rhs.x(); }).x();
-            const auto max_y = std::ranges::max(points, [](const auto& lhs, const auto& rhs) { return lhs.y() < rhs.y(); }).y();
-            const auto max_z = std::ranges::max(points, [](const auto& lhs, const auto& rhs) { return lhs.z() < rhs.z(); }).z();
-            const auto min_x = std::ranges::min(points, [](const auto& lhs, const auto& rhs) { return lhs.x() < rhs.x(); }).x();
-            const auto min_y = std::ranges::min(points, [](const auto& lhs, const auto& rhs) { return lhs.y() < rhs.y(); }).y();
-            const auto min_z = std::ranges::min(points, [](const auto& lhs, const auto& rhs) { return lhs.z() < rhs.z(); }).z();
-            return line_plane_intersection(point, vec, calc_normal_vec(points), points[3], { min_x, min_y, min_z }, { max_x, max_y, max_z });
-        }},
-        obj
-    );
-
-    auto filtered = ret
-                  | std::views::filter([point](const auto& x) { return (point - x).length() <= 100; });
-
-    return std::vector(std::begin(filtered), std::end(filtered));
-}
-
 auto closest_to(const nova::Vec3f& point, const std::vector<nova::Vec3f>& points)
         -> nova::Vec3f
 {
@@ -173,6 +65,111 @@ auto closest_to(const nova::Vec3f& point, const std::vector<nova::Vec3f>& points
     }
 
     return closest;
+}
+
+std::optional<hit_record> hit(const cylinder& cyl, const ray& r) {
+    // Translate the line and cylinder center to the origin
+    const auto point_cyl = r.origin - cyl.center;
+
+    // Calculate the direction vector of the line in the cylinder coordinate system
+    const auto vec_cyl = r.direction - cyl.axis * nova::dot(r.direction, cyl.axis);
+
+    // Calculate the coefficients for the quadratic equation
+    const auto a = vec_cyl.x() * vec_cyl.x() + vec_cyl.y() * vec_cyl.y();
+    const auto b = 2 * (point_cyl.x() * vec_cyl.x() + point_cyl.y() * vec_cyl.y());
+    const auto c = point_cyl.x() * point_cyl.x() + point_cyl.y() * point_cyl.y() - cyl.radius * cyl.radius;
+
+    // Calculate the discriminant
+    const auto discriminant = b * b - 4 * a * c;
+
+    // Check if there are any real roots (intersection points)
+    if (discriminant < 0) {
+        return std::nullopt;  // No intersection
+    }
+
+    // Two intersection points
+    const auto t1 = (-b + std::sqrt(discriminant)) / (2 * a);
+    const auto t2 = (-b - std::sqrt(discriminant)) / (2 * a);
+
+    hit_record ret;
+
+    ret.t = r.at(t1).length() < r.at(t2).length() ? t1 : t2;
+    ret.point = r.at(ret.t);
+    ret.normal = (ret.point - cyl.center) / cyl.radius;
+
+    return ret;
+}
+
+std::optional<hit_record> hit(const plane& plane, const ray& r) {
+    const auto points = std::vector<nova::Vec3f>{ plane.p0, plane.p1, plane.p2, plane.p3 };
+    const auto max_x = std::ranges::max(points, [](const auto& lhs, const auto& rhs) { return lhs.x() < rhs.x(); }).x();
+    const auto max_y = std::ranges::max(points, [](const auto& lhs, const auto& rhs) { return lhs.y() < rhs.y(); }).y();
+    const auto max_z = std::ranges::max(points, [](const auto& lhs, const auto& rhs) { return lhs.z() < rhs.z(); }).z();
+    const auto min_x = std::ranges::min(points, [](const auto& lhs, const auto& rhs) { return lhs.x() < rhs.x(); }).x();
+    const auto min_y = std::ranges::min(points, [](const auto& lhs, const auto& rhs) { return lhs.y() < rhs.y(); }).y();
+    const auto min_z = std::ranges::min(points, [](const auto& lhs, const auto& rhs) { return lhs.z() < rhs.z(); }).z();
+    const auto plane_normal = calc_normal_vec(points);
+    const auto plane_point = plane.p3;
+
+    // Calculate the dot product of the plane normal and the line direction vector
+    const auto dot_prod = nova::dot(plane_normal, r.direction);
+
+    // Check if the line is parallel to the plane
+    if (std::abs(dot_prod) < 1e-6f) {
+        return {};
+    }
+
+    // Calculate the vector from a point on the plane to the line's point of origin
+    const auto plane_to_line = r.origin - plane_point;
+
+    // Calculate the distance along the line to the intersection point
+    const auto t = -nova::dot(plane_to_line, plane_normal) / dot_prod;
+
+    // Calculate the intersection point
+    const auto intersection = r.at(t);
+
+    // Check if the intersection point lies outside the bounds of the finite plane
+    if (not (min_x <= intersection.x() and intersection.x() <= max_x
+        and min_y <= intersection.y() and intersection.y() <= max_y
+        and min_z <= intersection.z() and intersection.z() <= max_z)) {
+        return std::nullopt;
+    }
+
+    hit_record ret;
+
+    ret.t = t;
+    ret.point = intersection;
+    // ret.normal
+
+    return ret;
+}
+
+auto ray_cast(const ray& r, const std::vector<primitive>& primitives)
+        -> std::vector<nova::Vec3f>
+{
+    std::vector<nova::Vec3f> ret;
+    ret.reserve(primitives.size());
+
+    for (const auto& elem : primitives) {
+        const std::optional<hit_record> hit_rec = std::visit(lambdas{
+                [&r](const cylinder& p) { return hit(p, r); },
+                [&r](const plane& p)    { return hit(p, r); },
+            },
+            elem
+        );
+        if (hit_rec.has_value()) {
+            const auto& hit_point = hit_rec->point;
+            // Filter out points behind the lidar
+            if (nova::dot(hit_point - r.origin, r.direction) >= 0) {
+                ret.push_back(hit_point);
+            }
+        }
+    }
+
+    auto filtered = ret
+                  | std::views::filter([point = r.origin](const auto& x) { return (point - x).length() <= 100; });
+
+    return std::vector(std::begin(filtered), std::end(filtered));
 }
 
 class lidar {
@@ -226,21 +223,13 @@ private:
             for (auto angle_v : m_angles_ver) {
                 angle_v = deg2rad(angle_v);
 
-                // Define the point on the line (Origin)
-                const auto p0 = m_origin;
-
-                const auto v = nova::Vec3f{
+                const auto direction = nova::Vec3f{
                     std::cos(angle_v) * std::sin(angle_h),
                     std::cos(angle_v) * std::cos(angle_h),
                     std::sin(angle_v)
                 };
 
-                for (const auto& obj : m_objects) {
-                    const auto points = intersections(p0, v, obj);
-                    if (points.size() > 0) {
-                        result.push_back(closest_to(p0, points));
-                    }
-                }
+                result.push_back(closest_to(m_origin, ray_cast(ray{ m_origin, direction }, m_objects)));
             }
         }
 
