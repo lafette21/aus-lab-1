@@ -7,41 +7,54 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <variant>
 #include <vector>
 
 
-enum class object_type {
-    cylinder,
-    plane,
+template <typename... Ts>
+struct lambdas : Ts... { using Ts::operator()...; };
+
+template <typename... Ts>
+lambdas(Ts...) -> lambdas<Ts...>;
+
+struct cylinder {
+    nova::Vec3f center;
+    nova::Vec3f axis;
+    float radius;
+    float height;
 };
 
+struct plane {
+    nova::Vec3f p0, p1, p2, p3;
+};
+
+using primitive = std::variant<cylinder, plane>;
+
+std::istream& operator>>(std::istream& is, nova::Vec3f& vec) {
+    is >> vec.x() >> vec.y() >> vec.z();
+    return is;
+}
+
 struct map_parser {
-    [[nodiscard]] std::vector<std::pair<object_type, std::vector<nova::Vec3f>>> operator()(std::istream& iF) {
+    [[nodiscard]] std::vector<primitive> operator()(std::istream& iF) {
         using namespace std::string_literals;
-        std::vector<std::pair<object_type, std::vector<nova::Vec3f>>> result;
+        std::vector<primitive> ret;
         for (std::string line; std::getline(iF, line); ) {
             std::stringstream ss;
             ss << line << '\n';
             std::string obj_type;
-            nova::Vec3f point;
             ss >> obj_type;
             if (obj_type == "plane"s) {
-                std::vector<nova::Vec3f> vec;
-                for (std::size_t i = 0; i < 4; ++i) {
-                    ss >> point.x() >> point.y() >> point.z();
-                    vec.push_back(point);
-                }
-                result.emplace_back(object_type::plane, vec);
+                plane plane;
+                ss >> plane.p0 >> plane.p1 >> plane.p2 >> plane.p3;
+                ret.push_back(plane);
             } else if (obj_type == "cylinder"s) {
-                std::vector<nova::Vec3f> vec;
-                for (std::size_t i = 0; i < 1; ++i) {
-                    ss >> point.x() >> point.y() >> point.z();
-                    vec.push_back(point);
-                }
-                result.emplace_back(object_type::cylinder, vec);
+                cylinder cyl;
+                ss >> cyl.center;
+                ret.push_back(cyl);
             }
         }
-        return result;
+        return ret;
     }
 };
 

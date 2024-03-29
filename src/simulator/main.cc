@@ -133,25 +133,27 @@ auto line_cylinder_intersection(
     };
 }
 
-auto intersections(const nova::Vec3f& point, const nova::Vec3f& vec, const std::pair<object_type, std::vector<nova::Vec3f>>& obj)
+auto intersections(const nova::Vec3f& point, const nova::Vec3f& vec, const primitive& obj)
         -> std::vector<nova::Vec3f>
 {
-    std::vector<nova::Vec3f> result;
+    const auto ret = std::visit(lambdas{
+        [point, vec](const cylinder& p) {
+            return line_cylinder_intersection(point, vec, p.center, { 0, 0, 1 }, 0.35f);
+        },
+        [point, vec](const plane& p) {
+            const auto points = std::vector<nova::Vec3f>{ p.p0, p.p1, p.p2, p.p3 };
+            const auto max_x = std::ranges::max(points, [](const auto& lhs, const auto& rhs) { return lhs.x() < rhs.x(); }).x();
+            const auto max_y = std::ranges::max(points, [](const auto& lhs, const auto& rhs) { return lhs.y() < rhs.y(); }).y();
+            const auto max_z = std::ranges::max(points, [](const auto& lhs, const auto& rhs) { return lhs.z() < rhs.z(); }).z();
+            const auto min_x = std::ranges::min(points, [](const auto& lhs, const auto& rhs) { return lhs.x() < rhs.x(); }).x();
+            const auto min_y = std::ranges::min(points, [](const auto& lhs, const auto& rhs) { return lhs.y() < rhs.y(); }).y();
+            const auto min_z = std::ranges::min(points, [](const auto& lhs, const auto& rhs) { return lhs.z() < rhs.z(); }).z();
+            return line_plane_intersection(point, vec, calc_normal_vec(points), points[3], { min_x, min_y, min_z }, { max_x, max_y, max_z });
+        }},
+        obj
+    );
 
-    if (obj.first == object_type::plane) {
-        const auto points = obj.second;
-        // TODO: This shouldn't be in a hot-loop
-        const auto max_x = std::ranges::max(points, [](const auto& lhs, const auto& rhs) { return lhs.x() < rhs.x(); }).x();
-        const auto max_y = std::ranges::max(points, [](const auto& lhs, const auto& rhs) { return lhs.y() < rhs.y(); }).y();
-        const auto max_z = std::ranges::max(points, [](const auto& lhs, const auto& rhs) { return lhs.z() < rhs.z(); }).z();
-        const auto min_x = std::ranges::min(points, [](const auto& lhs, const auto& rhs) { return lhs.x() < rhs.x(); }).x();
-        const auto min_y = std::ranges::min(points, [](const auto& lhs, const auto& rhs) { return lhs.y() < rhs.y(); }).y();
-        const auto min_z = std::ranges::min(points, [](const auto& lhs, const auto& rhs) { return lhs.z() < rhs.z(); }).z();
-        result = line_plane_intersection(point, vec, calc_normal_vec(points), points[3], { min_x, min_y, min_z }, { max_x, max_y, max_z });
-    } else if (obj.first == object_type::cylinder) {
-        result = line_cylinder_intersection(point, vec, obj.second[0], { 0, 0, 1 }, 0.35f);
-    }
-    auto filtered = result
+    auto filtered = ret
                   | std::views::filter([point](const auto& x) { return (point - x).length() <= 100; });
 
     return std::vector(std::begin(filtered), std::end(filtered));
@@ -209,7 +211,7 @@ private:
     std::vector<float> m_angles_hor;
     std::vector<float> m_angles_ver;
     std::vector<nova::Vec3f> m_data;
-    std::vector<std::pair<object_type, std::vector<nova::Vec3f>>> m_objects;
+    std::vector<primitive> m_objects;
     nova::Vec3f m_origin = { 0, 0, 1.5 };
     bool m_running = false;
 
@@ -257,10 +259,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
                     | std::views::transform([](const auto& arg) { return std::string_view{ arg }; });
 
     const auto objects = nova::read_file<map_parser>(std::filesystem::path(args[2]).string()).value();
-
-    // for (const auto& [type, data] : objects) {
-        // fmt::println("{}", std::to_underlying<object_type>(type));
-    // }
 
     json config(nova::read_file(std::filesystem::path(args[1]).string()).value());
     lidar lidar { config.at("vlp_16"), objects };
