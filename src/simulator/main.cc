@@ -174,8 +174,8 @@ auto ray_cast(const ray& r, const std::vector<primitive>& primitives)
 
 class lidar {
 public:
-    lidar(const json& config, const auto& objects)
-        : m_config(config), m_objects(objects)
+    lidar(const json& config)
+        : m_config(config)
     {
         m_ang_res_h = m_config.lookup<float>("rpm.value") / 60 * 360 * m_config.lookup<float>("firing_cycle");
         m_angles_hor = nova::linspace(nova::range{ 0.f, m_config.lookup<float>("fov_h") }, static_cast<std::size_t>(m_config.lookup<float>("fov_h") / m_ang_res_h), false);
@@ -188,31 +188,7 @@ public:
 
     auto data() { return m_data; }
 
-    void start() {
-        m_running = true;
-
-        while (m_running) {
-            m_data = rotation();
-
-            break;
-        }
-    }
-
-    void stop() {
-        m_running = false;
-    }
-
-private:
-    json m_config;
-    float m_ang_res_h;
-    std::vector<float> m_angles_hor;
-    std::vector<float> m_angles_ver;
-    std::vector<nova::Vec3f> m_data;
-    std::vector<primitive> m_objects;
-    nova::Vec3f m_origin = { 0, 0, 1.5 };
-    bool m_running = false;
-
-    std::vector<nova::Vec3f> rotation() {
+    auto scan(const auto& objects) {
         std::vector<nova::Vec3f> result;
         result.reserve(m_angles_ver.size() * m_angles_hor.size());
 
@@ -229,7 +205,7 @@ private:
                     std::sin(angle_v)
                 };
 
-                result.push_back(closest_to(m_origin, ray_cast(ray{ m_origin, direction }, m_objects)));
+                result.push_back(closest_to(m_origin, ray_cast(ray{ m_origin, direction }, objects)));
             }
         }
 
@@ -239,28 +215,70 @@ private:
 
         return result;
     }
+
+    void replace(const nova::Vec3f& pos) {
+        m_origin = pos;
+    }
+
+    void shift(const nova::Vec3f& t) {
+        m_origin += t;
+    }
+
+private:
+    json m_config;
+    float m_ang_res_h;
+    std::vector<float> m_angles_hor;
+    std::vector<float> m_angles_ver;
+    std::vector<nova::Vec3f> m_data;
+    nova::Vec3f m_origin = { 0, 0, 1.5 };
 };
 
-int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
-    [[maybe_unused]] auto& logger = init("logger");
+void print(const std::string& path, const auto& data) {
+    std::ofstream oF(path);
+
+    for (const auto& d : data) {
+        oF << fmt::format("{} {} {} 0 0 0\n", d.x(), d.y(), d.z());
+    }
+}
+
+template <typename Lidar>
+class vehicle {
+public:
+    vehicle(const json& config, const auto& objects)
+        : m_config(config)
+        , m_objects(objects)
+        , m_lidar(m_config.at("lidar.vlp_16"))
+    {
+        spdlog::info(m_lidar.string());
+    }
+
+    auto func() {
+        m_lidar.replace({ -5, 0, 1.5 });
+
+        for (std::size_t i = 0; i < 10; ++i) {
+            print(fmt::format("./out/l_out_{}.xyz", i + 1), m_lidar.scan(m_objects));
+            m_lidar.shift({ 1, 0, 0 });
+        }
+    }
+
+private:
+    json m_config;
+    std::vector<primitive> m_objects;
+    Lidar m_lidar;
+};
+
+int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
+    [[maybe_unused]] auto& logger = init("simulator");
 
     const auto args = std::span<char*>(argv, static_cast<std::size_t>(argc))
                     | std::views::transform([](const auto& arg) { return std::string_view{ arg }; });
 
     const auto objects = nova::read_file<map_parser>(std::filesystem::path(args[2]).string()).value();
+    const json config(nova::read_file(std::filesystem::path(args[1]).string()).value());
 
-    json config(nova::read_file(std::filesystem::path(args[1]).string()).value());
-    lidar lidar { config.at("vlp_16"), objects };
+    vehicle<lidar> car(config, objects);
 
-    spdlog::info(lidar.string());
-
-    lidar.start();
-
-    std::ofstream oF("./l_out.xyz");
-
-    for (const auto& d : lidar.data()) {
-        oF << fmt::format("{} {} {} 0 0 0\n", d.x(), d.y(), d.z());
-    }
+    car.func();
 
     return EXIT_SUCCESS;
 }
