@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+#include <cmath>
+
 using json = nova::json;
 
 
@@ -211,7 +213,7 @@ public:
 
         const auto end = nova::now();
         const auto took = end - start;
-        fmt::println("rotation took: {}", took);
+        spdlog::info("[LIDAR] rotation took: {}", took);
 
         return result;
     }
@@ -241,30 +243,116 @@ void print(const std::string& path, const auto& data) {
     }
 }
 
-template <typename Lidar>
+struct pose {
+    nova::Vec3f position;
+    nova::Vec3f orientation;
+};
+
+class gyroscope {
+public:
+    gyroscope(const pose& pose)
+        : m_curr_pose(pose)
+        , m_prev_pose(m_curr_pose)
+    {}
+
+    // TODO: unit tests needed
+    // TODO: currently only the orientation along the Z axis is used
+    auto measure()
+            -> nova::Vec3f
+    {
+        const auto angle_curr = m_curr_pose.orientation.z();
+        const auto angle_prev = m_prev_pose.orientation.z();
+        float angle_diff;
+
+        spdlog::info("[IMU] angle_curr: {}\tangle_prev:{}", angle_curr, angle_prev);
+
+        if (std::signbit(angle_curr) == std::signbit(angle_prev)
+            or (angle_curr == 0 and angle_prev != 0)
+            or (angle_curr != 0 and angle_prev == 0)
+        ) {
+            angle_diff = angle_curr - angle_prev;
+        } else {
+            const auto dominant = (std::numbers::pi_v<float> - std::abs(angle_curr)) > (std::numbers::pi_v<float> - std::abs(angle_prev)) ? angle_curr : angle_prev;
+            angle_diff = std::abs(std::abs(angle_curr) - std::abs(angle_prev));
+            angle_diff *= std::signbit(dominant) ? -1.f : 1.f;
+        }
+
+        m_prev_pose = m_curr_pose;
+
+        return {
+            0,
+            0,
+            angle_diff
+        };
+    }
+
+private:
+    const pose& m_curr_pose;
+    pose m_prev_pose;
+};
+
+class speedometer {
+public:
+    speedometer() {}
+
+    auto measure() {
+        return 1.f;
+    }
+};
+
+template <>
+struct fmt::formatter<nova::Vec3f> {
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx) {
+        return ctx.begin();
+    }
+
+    template <typename ParseContext>
+    auto format(const nova::Vec3f& obj, ParseContext& ctx) {
+        return fmt::format_to(ctx.out(), "{{ {}, {}, {} }}", obj.x(), obj.y(), obj.z());
+    }
+};
+
 class vehicle {
 public:
     vehicle(const json& config, const auto& objects)
         : m_config(config)
         , m_objects(objects)
         , m_lidar(m_config.at("lidar.vlp_16"))
+        , m_gyroscope(m_pose)
     {
         spdlog::info(m_lidar.string());
     }
 
-    auto func() {
-        m_lidar.replace({ -5, 0, 1.5 });
+    // auto func() {
+        // m_lidar.replace({ -5, 0, 1.5 });
 
-        for (std::size_t i = 0; i < 10; ++i) {
-            print(fmt::format("./out/l_out_{}.xyz", i + 1), m_lidar.scan(m_objects));
-            m_lidar.shift({ 1, 0, 0 });
-        }
+        // for (std::size_t i = 0; i < 10; ++i) {
+            // print(fmt::format("./out/l_out_{}.xyz", i + 1), m_lidar.scan(m_objects));
+            // m_lidar.shift({ 1, 0, 0 });
+        // }
+    // }
+
+    auto move(const nova::Vec3f& vec, const nova::Vec3f& ang_vel) {
+        m_pose.position += vec;
+        m_pose.orientation += ang_vel;
+    }
+
+    auto func() {
+        const auto lidar_meas = m_lidar.scan(m_objects);
+        const auto velocity = m_speedometer.measure();
+        const auto ang_vel = m_gyroscope.measure();
+
+        spdlog::info("[VEHICLE] velocity: {}\tang_vel: {}\tcloud.size: {}", velocity, ang_vel, lidar_meas.size());
     }
 
 private:
     json m_config;
     std::vector<primitive> m_objects;
-    Lidar m_lidar;
+    pose m_pose{};
+    lidar m_lidar;
+    gyroscope m_gyroscope;
+    speedometer m_speedometer{};
 };
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
@@ -276,9 +364,12 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
     const auto objects = nova::read_file<map_parser>(std::filesystem::path(args[2]).string()).value();
     const json config(nova::read_file(std::filesystem::path(args[1]).string()).value());
 
-    vehicle<lidar> car(config, objects);
+    vehicle car(config, objects);
 
-    car.func();
+    for (std::size_t i = 0; i < 5; ++i) {
+        car.func();
+        car.move({ 1.f, 0, 0 }, { 0, 0, 0.1f * (i + 1) });
+    }
 
     return EXIT_SUCCESS;
 }
