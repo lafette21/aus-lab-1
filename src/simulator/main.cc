@@ -2,13 +2,18 @@
 
 #include <fmt/chrono.h>
 #include <fmt/format.h>
+#include <gsl/gsl_interp.h>
+#include <gsl/gsl_spline.h>
 #include <nova/io.h>
 #include <nova/json.h>
 #include <nova/vec.h>
 #include <nova/utils.h>
+#include <range/v3/range/conversion.hpp>
 #include <spdlog/spdlog.h>
 
+#include <array>
 #include <fstream>
+#include <future>
 #include <numbers>
 #include <ranges>
 #include <span>
@@ -315,9 +320,8 @@ struct fmt::formatter<nova::Vec3f> {
 
 class vehicle {
 public:
-    vehicle(const json& config, const auto& objects)
+    vehicle(const json& config)
         : m_config(config)
-        , m_objects(objects)
         , m_lidar(m_config.at("lidar.vlp_16"))
         , m_gyroscope(m_pose)
     {
@@ -333,26 +337,134 @@ public:
         // }
     // }
 
-    auto move(const nova::Vec3f& vec, const nova::Vec3f& ang_vel) {
-        m_pose.position += vec;
+    auto move(const nova::Vec3f& t, const nova::Vec3f& ang_vel) {
+        m_pose.position += t;
         m_pose.orientation += ang_vel;
     }
 
-    auto func() {
-        const auto lidar_meas = m_lidar.scan(m_objects);
-        const auto velocity = m_speedometer.measure();
-        const auto ang_vel = m_gyroscope.measure();
+    auto func(const auto& objects) {
+        auto future_lidar = std::async([&objects, this] { return m_lidar.scan(objects); });
+        auto future_velocity = std::async([this] { return m_speedometer.measure(); });
+        auto future_ang_vel = std::async([this] { return m_gyroscope.measure(); });
+
+        const auto lidar_meas = future_lidar.get();
+        const auto velocity = future_velocity.get();
+        const auto ang_vel = future_ang_vel.get();
 
         spdlog::info("[VEHICLE] velocity: {}\tang_vel: {}\tcloud.size: {}", velocity, ang_vel, lidar_meas.size());
     }
 
 private:
     json m_config;
-    std::vector<primitive> m_objects;
     pose m_pose{};
     lidar m_lidar;
     gyroscope m_gyroscope;
     speedometer m_speedometer{};
+};
+
+template <std::floating_point T = float>
+auto interpolate(const std::vector<T>& x, const std::vector<T>& y, std::size_t num_points = 100)
+        -> std::array<std::vector<T>, 2>
+{
+    assert(x.size() == y.size());
+
+    std::vector<double> _x;
+    std::vector<double> _y;
+
+    if constexpr (std::is_same_v<T, double>) {
+        _x = x;
+        _y = y;
+    } else {
+        _x = x
+           | ranges::to<std::vector<double>>();
+        _y = y
+           | ranges::to<std::vector<double>>();
+    }
+
+    gsl_interp_accel* acc = gsl_interp_accel_alloc();
+    gsl_spline* spline_x = gsl_spline_alloc(gsl_interp_cspline, _x.size());
+    gsl_spline* spline_y = gsl_spline_alloc(gsl_interp_cspline, _y.size());
+
+    const auto t = nova::linspace<double>(nova::range<double>{ 0, static_cast<double>(_x.size()) }, _x.size(), false);
+
+    gsl_spline_init(spline_x, t.data(), _x.data(), t.size());
+    gsl_spline_init(spline_y, t.data(), _y.data(), t.size());
+
+    std::vector<T> ret_x;
+    std::vector<T> ret_y;
+
+    ret_x.reserve(_x.size());
+    ret_y.reserve(_y.size());
+
+    double t_max = t.back();
+    double step = t_max / (static_cast<double>(num_points) - 1.0);
+
+    for (std::size_t i = 0; i < num_points; ++i) {
+        double ti = step * static_cast<double>(i);
+        ret_x.push_back(static_cast<T>(gsl_spline_eval(spline_x, ti, acc)));
+        ret_y.push_back(static_cast<T>(gsl_spline_eval(spline_y, ti, acc)));
+    }
+
+    gsl_spline_free(spline_x);
+    gsl_spline_free(spline_y);
+    gsl_interp_accel_free(acc);
+
+    return {
+        ret_x,
+        ret_y
+    };
+}
+
+class simulation {
+public:
+    simulation(const json& config, const auto& objects, const auto& path)
+        : m_config(config)
+        , m_objects(objects)
+        , m_path(path)
+        , m_vehicle(config)
+    {}
+
+    auto start() {
+        setup();
+
+        for (const auto& [i, p] : std::views::enumerate(m_path_interp)) {
+            m_vehicle.func(m_objects);
+            m_vehicle.move(p, { 0, 0, 0.1f * (i + 1) });
+        }
+    }
+
+private:
+    json m_config;
+    std::vector<primitive> m_objects;
+    std::vector<nova::Vec3f> m_path;
+    std::vector<nova::Vec3f> m_path_interp;
+    vehicle m_vehicle;
+
+    void setup() {
+        const auto xs = m_path
+                      | std::views::transform([](const auto& elem) { return elem.x(); })
+                      | ranges::to<std::vector>();
+
+        const auto ys = m_path
+                      | std::views::transform([](const auto& elem) { return elem.y(); })
+                      | ranges::to<std::vector>();
+
+        for (const auto& [x, y] : std::views::zip(xs, ys)) {
+            spdlog::debug("x={}\ty={}", x, y);
+        }
+
+        const auto [xs_interp, ys_interp] = interpolate(xs, ys, 101);
+
+        const auto path = std::views::zip(xs_interp, ys_interp)
+                        | std::views::transform([](const auto& elem) { const auto& [x, y] = elem; return nova::Vec3f{ x, y, 0 }; })
+                        | ranges::to<std::vector>();
+
+        for (const auto& p : path) {
+            spdlog::debug("{}", p);
+        }
+
+        m_path_interp = path;
+    }
 };
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
@@ -362,14 +474,12 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
                     | std::views::transform([](const auto& arg) { return std::string_view{ arg }; });
 
     const auto objects = nova::read_file<map_parser>(std::filesystem::path(args[2]).string()).value();
+    const auto path = nova::read_file<xyz_parser>(std::filesystem::path(args[3]).string()).value();
     const json config(nova::read_file(std::filesystem::path(args[1]).string()).value());
 
-    vehicle car(config, objects);
+    simulation simulation(config, objects, path);
 
-    for (std::size_t i = 0; i < 5; ++i) {
-        car.func();
-        car.move({ 1.f, 0, 0 }, { 0, 0, 0.1f * (i + 1) });
-    }
+    simulation.start();
 
     return EXIT_SUCCESS;
 }

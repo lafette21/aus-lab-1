@@ -73,4 +73,19 @@ struct map_parser {
     }
 };
 
+struct xyz_parser {
+    [[nodiscard]] std::vector<nova::Vec3f> operator()(std::istream& iF) {
+        using namespace std::string_literals;
+        std::vector<nova::Vec3f> ret;
+        for (std::string line; std::getline(iF, line); ) {
+            std::stringstream ss;
+            ss << line << '\n';
+            nova::Vec3f vec;
+            ss >> vec;
+            ret.push_back(vec);
+        }
+        return ret;
+    }
+};
+
 #endif // TYPES_HH
