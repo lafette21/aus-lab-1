@@ -1,14 +1,20 @@
 % cylinder cx cy cz ax ay az r h
 % plane p0x p0y p0z p1x p1y p1z p2x p2y p2z p3x p3y p3z
-plane -6 -4 0 -6 4 0 6 4 0 6 -4 0
-plane -6 -4 0 -6 4 0 -6 -4 2.7 -6 4 2.7
-plane 6 4 0 6 -4 0 6 4 2.7 6 -4 2.7
-plane -6 -4 0 6 -4 0 -6 -4 2.7 6 -4 2.7
-plane -6 4 0 6 4 0 -6 4 2.7 6 4 2.7
-plane -6 -4 2.7 -6 4 2.7 6 4 2.7 6 -4 2.7
+% sphere cx cy cz r
+plane -12 -4 0 -12 4 0 12 4 0 12 -4 0
+plane -12 -4 0 -12 4 0 -12 -4 2.7 -12 4 2.7
+plane 12 4 0 12 -4 0 12 4 2.7 12 -4 2.7
+plane -12 -4 0 12 -4 0 -12 -4 2.7 12 -4 2.7
+plane -12 4 0 12 4 0 -12 4 2.7 12 4 2.7
+plane -12 -4 2.7 -12 4 2.7 12 4 2.7 12 -4 2.7
+cylinder -10 -3 0 0 0 1 0.35 2.7
+cylinder -10 3 0 0 0 1 0.35 2.7
 cylinder -5 -3 0 0 0 1 0.35 2.7
 cylinder -5 3 0 0 0 1 0.35 2.7
 cylinder 0 -3 0 0 0 1 0.35 2.7
 cylinder 0 3 0 0 0 1 0.35 2.7
 cylinder 5 -3 0 0 0 1 0.35 2.7
 cylinder 5 3 0 0 0 1 0.35 2.7
+cylinder 10 3 0 0 0 1 0.35 2.7
+cylinder 10 -3 0 0 0 1 0.35 2.7
+% sphere 0 0 1.35 0.35

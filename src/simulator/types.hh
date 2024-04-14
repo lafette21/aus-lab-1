@@ -28,7 +28,12 @@ struct plane {
     nova::Vec3f p0, p1, p2, p3;
 };
 
-using primitive = std::variant<cylinder, plane>;
+struct sphere {
+    nova::Vec3f center;
+    float radius;
+};
+
+using primitive = std::variant<cylinder, plane, sphere>;
 
 struct hit_record {
     nova::Vec3f point;
@@ -67,6 +72,10 @@ struct map_parser {
                 cylinder cyl;
                 ss >> cyl.center >> cyl.axis >> cyl.radius >> cyl.height;
                 ret.push_back(cyl);
+            } else if (obj_type == "sphere"s) {
+                sphere sphere;
+                ss >> sphere.center >> sphere.radius;
+                ret.push_back(sphere);
             }
         }
         return ret;

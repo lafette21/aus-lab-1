@@ -95,12 +95,13 @@ std::optional<hit_record> hit(const cylinder& cyl, const ray& r) {
     }
 
     // Two intersection points
-    const auto t1 = (-b + std::sqrt(discriminant)) / (2 * a);
+    // const auto t1 = (-b + std::sqrt(discriminant)) / (2 * a);
     const auto t2 = (-b - std::sqrt(discriminant)) / (2 * a);
 
     hit_record ret;
 
-    ret.t = r.at(t1).length() < r.at(t2).length() ? t1 : t2;
+    // ret.t = r.at(t1).length() < r.at(t2).length() ? t1 : t2;
+    ret.t = t2;
     ret.point = r.at(ret.t);
     ret.normal = (ret.point - cyl.center) / cyl.radius;
 
@@ -151,6 +152,25 @@ std::optional<hit_record> hit(const plane& plane, const ray& r) {
     return ret;
 }
 
+std::optional<hit_record> hit(const sphere& sphere, const ray& r) {
+    const auto x = r.origin - sphere.center;
+    const auto a = nova::dot(r.direction, r.direction);
+    const auto b = nova::dot(x, r.direction) * 2.f;
+    const auto c = nova::dot(x, x) - sphere.radius * sphere.radius;
+    const auto discriminant = b * b - 4 * a * c;
+
+    if (discriminant < 0) {
+        return std::nullopt;
+    }
+
+    hit_record ret;
+    ret.t = (-b - std::sqrt(discriminant)) / (2.f * a);
+    ret.point = r.at(ret.t);
+    ret.normal = (ret.point - sphere.center) / sphere.radius;
+
+    return ret;
+}
+
 auto ray_cast(const ray& r, const std::vector<primitive>& primitives)
         -> std::vector<nova::Vec3f>
 {
@@ -158,7 +178,9 @@ auto ray_cast(const ray& r, const std::vector<primitive>& primitives)
     ret.reserve(primitives.size());
 
     for (const auto& elem : primitives) {
-        const std::optional<hit_record> hit_rec = std::visit(lambdas{
+        const std::optional<hit_record> hit_rec = std::visit(
+            lambdas{
+                [&r](const sphere& p)   { return hit(p, r); },
                 [&r](const cylinder& p) { return hit(p, r); },
                 [&r](const plane& p)    { return hit(p, r); },
             },
@@ -174,9 +196,10 @@ auto ray_cast(const ray& r, const std::vector<primitive>& primitives)
     }
 
     auto filtered = ret
-                  | std::views::filter([point = r.origin](const auto& x) { return (point - x).length() <= 100; });
+                  | std::views::filter([point = r.origin](const auto& x) { return (point - x).length() <= 100; })
+                  | ranges::to<std::vector>();
 
-    return std::vector(std::begin(filtered), std::end(filtered));
+    return filtered;
 }
 
 class lidar {
@@ -193,16 +216,28 @@ public:
         return fmt::format("lidar(m_config={}, m_ang_res_h={})", m_config.dump(), m_ang_res_h);
     }
 
-    auto data() { return m_data; }
+    auto pos() {
+        return m_origin;
+    }
 
-    auto scan(const auto& objects) {
+    auto scan(const auto& objects, float orientation) {
         std::vector<nova::Vec3f> result;
         result.reserve(m_angles_ver.size() * m_angles_hor.size());
 
         const auto start = nova::now();
 
+        if (orientation < 0) {
+            orientation += 2.f * std::numbers::pi_v<float>;
+        }
+
         for (auto angle_h : m_angles_hor) {
             angle_h = deg2rad(angle_h);
+            angle_h += orientation;
+            if (angle_h > 2.f * std::numbers::pi_v<float>) {
+                angle_h -= 2.f * std::numbers::pi_v<float>;
+            } else if (angle_h < -2.f * std::numbers::pi_v<float>) {
+                angle_h += 2.f * std::numbers::pi_v<float>;
+            }
             for (auto angle_v : m_angles_ver) {
                 angle_v = deg2rad(angle_v);
 
@@ -253,56 +288,9 @@ struct pose {
     nova::Vec3f orientation;
 };
 
-class gyroscope {
-public:
-    gyroscope(const pose& pose)
-        : m_curr_pose(pose)
-        , m_prev_pose(m_curr_pose)
-    {}
-
-    // TODO: unit tests needed
-    // TODO: currently only the orientation along the Z axis is used
-    auto measure()
-            -> nova::Vec3f
-    {
-        const auto angle_curr = m_curr_pose.orientation.z();
-        const auto angle_prev = m_prev_pose.orientation.z();
-        float angle_diff;
-
-        spdlog::info("[IMU] angle_curr: {}\tangle_prev:{}", angle_curr, angle_prev);
-
-        if (std::signbit(angle_curr) == std::signbit(angle_prev)
-            or (angle_curr == 0 and angle_prev != 0)
-            or (angle_curr != 0 and angle_prev == 0)
-        ) {
-            angle_diff = angle_curr - angle_prev;
-        } else {
-            const auto dominant = (std::numbers::pi_v<float> - std::abs(angle_curr)) > (std::numbers::pi_v<float> - std::abs(angle_prev)) ? angle_curr : angle_prev;
-            angle_diff = std::abs(std::abs(angle_curr) - std::abs(angle_prev));
-            angle_diff *= std::signbit(dominant) ? -1.f : 1.f;
-        }
-
-        m_prev_pose = m_curr_pose;
-
-        return {
-            0,
-            0,
-            angle_diff
-        };
-    }
-
-private:
-    const pose& m_curr_pose;
-    pose m_prev_pose;
-};
-
-class speedometer {
-public:
-    speedometer() {}
-
-    auto measure() {
-        return 1.f;
-    }
+struct motion {
+    float velocity;
+    nova::Vec3f ang_vel;
 };
 
 template <>
@@ -318,53 +306,9 @@ struct fmt::formatter<nova::Vec3f> {
     }
 };
 
-class vehicle {
-public:
-    vehicle(const json& config)
-        : m_config(config)
-        , m_lidar(m_config.at("lidar.vlp_16"))
-        , m_gyroscope(m_pose)
-    {
-        spdlog::info(m_lidar.string());
-    }
-
-    // auto func() {
-        // m_lidar.replace({ -5, 0, 1.5 });
-
-        // for (std::size_t i = 0; i < 10; ++i) {
-            // print(fmt::format("./out/l_out_{}.xyz", i + 1), m_lidar.scan(m_objects));
-            // m_lidar.shift({ 1, 0, 0 });
-        // }
-    // }
-
-    auto move(const nova::Vec3f& t, const nova::Vec3f& ang_vel) {
-        m_pose.position += t;
-        m_pose.orientation += ang_vel;
-    }
-
-    auto func(const auto& objects) {
-        auto future_lidar = std::async([&objects, this] { return m_lidar.scan(objects); });
-        auto future_velocity = std::async([this] { return m_speedometer.measure(); });
-        auto future_ang_vel = std::async([this] { return m_gyroscope.measure(); });
-
-        const auto lidar_meas = future_lidar.get();
-        const auto velocity = future_velocity.get();
-        const auto ang_vel = future_ang_vel.get();
-
-        spdlog::info("[VEHICLE] velocity: {}\tang_vel: {}\tcloud.size: {}", velocity, ang_vel, lidar_meas.size());
-    }
-
-private:
-    json m_config;
-    pose m_pose{};
-    lidar m_lidar;
-    gyroscope m_gyroscope;
-    speedometer m_speedometer{};
-};
-
 template <std::floating_point T = float>
-auto interpolate(const std::vector<T>& x, const std::vector<T>& y, std::size_t num_points = 100)
-        -> std::array<std::vector<T>, 2>
+auto interpolate_and_differentiate(const std::vector<T>& x, const std::vector<T>& y, std::size_t num_points = 100)
+        -> std::array<std::vector<T>, 6>
 {
     assert(x.size() == y.size());
 
@@ -392,9 +336,17 @@ auto interpolate(const std::vector<T>& x, const std::vector<T>& y, std::size_t n
 
     std::vector<T> ret_x;
     std::vector<T> ret_y;
+    std::vector<T> ret_dx;
+    std::vector<T> ret_dy;
+    std::vector<T> ret_ddx;
+    std::vector<T> ret_ddy;
 
     ret_x.reserve(_x.size());
     ret_y.reserve(_y.size());
+    ret_dx.reserve(_x.size());
+    ret_dy.reserve(_y.size());
+    ret_ddx.reserve(_x.size());
+    ret_ddy.reserve(_y.size());
 
     double t_max = t.back();
     double step = t_max / (static_cast<double>(num_points) - 1.0);
@@ -403,6 +355,10 @@ auto interpolate(const std::vector<T>& x, const std::vector<T>& y, std::size_t n
         double ti = step * static_cast<double>(i);
         ret_x.push_back(static_cast<T>(gsl_spline_eval(spline_x, ti, acc)));
         ret_y.push_back(static_cast<T>(gsl_spline_eval(spline_y, ti, acc)));
+        ret_dx.push_back(static_cast<T>(gsl_spline_eval_deriv(spline_x, ti, acc)));
+        ret_dy.push_back(static_cast<T>(gsl_spline_eval_deriv(spline_y, ti, acc)));
+        ret_ddx.push_back(static_cast<T>(gsl_spline_eval_deriv2(spline_x, ti, acc)));
+        ret_ddy.push_back(static_cast<T>(gsl_spline_eval_deriv2(spline_y, ti, acc)));
     }
 
     gsl_spline_free(spline_x);
@@ -411,7 +367,11 @@ auto interpolate(const std::vector<T>& x, const std::vector<T>& y, std::size_t n
 
     return {
         ret_x,
-        ret_y
+        ret_y,
+        ret_dx,
+        ret_dy,
+        ret_ddx,
+        ret_ddy
     };
 }
 
@@ -421,15 +381,104 @@ public:
         : m_config(config)
         , m_objects(objects)
         , m_path(path)
-        , m_vehicle(config)
+        , m_lidar(m_config.at("lidar.vlp_16"))
     {}
 
     auto start() {
         setup();
 
-        for (const auto& [i, p] : std::views::enumerate(m_path_interp)) {
-            m_vehicle.func(m_objects);
-            m_vehicle.move(p, { 0, 0, 0.1f * (i + 1) });
+        const auto origin = m_path[0];
+        const auto first_angle = std::atan2(m_path[1].x() - origin.x(), m_path[1].y() - origin.y());
+
+        for (auto& p : m_path) {
+            p -= origin;
+        }
+
+        for (auto& o : m_objects) {
+            std::visit(
+                lambdas{
+                    [origin](sphere& p)   { p.center -= origin; },
+                    [origin](cylinder& p) { p.center -= origin; },
+                    [origin](plane& p)    { p.p0 -= origin; p.p1 -= origin; p.p2 -= origin; p.p3 -= origin; },
+                },
+                o
+            );
+        }
+
+        std::vector<float> orientations;
+        orientations.reserve(m_path.size());
+        orientations.push_back(0);
+
+        for (std::size_t i = 1; i < m_path.size() - 1; ++i) {
+            const auto angle1 = std::atan2(m_path[i].x() - m_path[i - 1].x(), m_path[i].y() - m_path[i - 1].y());
+            const auto angle2 = std::atan2(m_path[i + 1].x() - m_path[i].x(), m_path[i + 1].y() - m_path[i].y());
+
+            float angle;
+
+            if (std::signbit(angle1) == std::signbit(angle2)) {
+                angle = angle1 + angle2;
+            } else {
+                const auto dominant = (std::numbers::pi_v<float> - std::abs(angle1)) > (std::numbers::pi_v<float> - std::abs(angle2)) ? angle1 : angle2;
+
+                angle = std::abs(angle1) + std::abs(angle2);
+                angle *= std::signbit(dominant) ? -1.f : 1.f;
+            }
+
+            orientations.push_back(angle / 2.f);
+        }
+
+        orientations.push_back(orientations.back());
+
+        // matplot::axis({ -matplot::inf, matplot::inf, -1, +1});
+        // matplot::plot(orientations, ".");
+        // matplot::show();
+
+        const auto poses = std::views::zip(m_path, orientations)
+                         | std::views::transform([](const auto& elem) { const auto& [pos, theta] = elem; return pose{ pos, nova::Vec3f{ 0, 0, theta } }; })
+                         | ranges::to<std::vector>();
+
+        const auto max_velocity = m_config.lookup<float>("simulation.velocity.max");
+        const auto velocities = normalize_data_into_range(m_curvature, 0.f, 0.7f)
+                              | std::views::transform([max_velocity](const auto& elem) { return (1.f - elem) * max_velocity; })
+                              | ranges::to<std::vector>();
+
+        const auto motion_sampling = m_config.lookup<float>("motion.sampling");
+        const auto distances = velocities
+                             | std::views::transform([motion_sampling](const auto& elem) { return elem * (1.f / motion_sampling); })
+                             | ranges::to<std::vector>();
+
+        // matplot::plot(velocities, ".");
+        // matplot::show();
+
+        const auto [sparse_path, indices] = select_data(m_path, distances);
+
+        const auto xs = sparse_path
+                      | std::views::transform([](const auto& elem) { return elem.x(); })
+                      | ranges::to<std::vector>();
+
+        const auto ys = sparse_path
+                      | std::views::transform([](const auto& elem) { return elem.y(); })
+                      | ranges::to<std::vector>();
+
+        // matplot::axis({ -20, 20, -20, 20 });
+        // matplot::plot(xs, ys, ".r");
+        // matplot::show();
+
+        const auto sparse_poses = [&poses, &indices] () -> std::vector<pose> {
+            std::vector<pose> ret;
+            ret.reserve(indices.size());
+
+            for (const auto& i : indices) {
+                ret.push_back(poses[i]);
+            }
+
+            return ret;
+        }();
+
+        for (const auto& [i, pose] : std::views::enumerate(sparse_poses)) {
+            m_lidar.replace({ pose.position.x(), pose.position.y(), m_lidar.pos().z() });
+            const auto data = m_lidar.scan(m_objects, pose.orientation.z());
+            print(fmt::format("./out/l_out_{}.xyz", i + 1), data);
         }
     }
 
@@ -437,25 +486,28 @@ private:
     json m_config;
     std::vector<primitive> m_objects;
     std::vector<nova::Vec3f> m_path;
-    std::vector<nova::Vec3f> m_path_interp;
-    vehicle m_vehicle;
+    std::vector<float> m_curvature;
+    lidar m_lidar;
 
     void setup() {
-        const auto xs = m_path
-                      | std::views::transform([](const auto& elem) { return elem.x(); })
-                      | ranges::to<std::vector>();
+        const auto _xs = m_path
+                       | std::views::transform([](const auto& elem) { return elem.x(); })
+                       | ranges::to<std::vector>();
 
-        const auto ys = m_path
-                      | std::views::transform([](const auto& elem) { return elem.y(); })
-                      | ranges::to<std::vector>();
+        const auto _ys = m_path
+                       | std::views::transform([](const auto& elem) { return elem.y(); })
+                       | ranges::to<std::vector>();
 
-        for (const auto& [x, y] : std::views::zip(xs, ys)) {
+        for (const auto& [x, y] : std::views::zip(_xs, _ys)) {
             spdlog::debug("x={}\ty={}", x, y);
         }
 
-        const auto [xs_interp, ys_interp] = interpolate(xs, ys, 101);
+        const auto [xs, ys, dxs, dys, ddxs, ddys] = interpolate_and_differentiate(_xs, _ys, m_config.lookup<std::size_t>("simulation.path.num_interp_points"));
 
-        const auto path = std::views::zip(xs_interp, ys_interp)
+        // matplot::plot(xs, ys, ".b");
+        // matplot::show();
+
+        const auto path = std::views::zip(xs, ys)
                         | std::views::transform([](const auto& elem) { const auto& [x, y] = elem; return nova::Vec3f{ x, y, 0 }; })
                         | ranges::to<std::vector>();
 
@@ -463,7 +515,72 @@ private:
             spdlog::debug("{}", p);
         }
 
-        m_path_interp = path;
+        m_path = path;
+
+        assert(dxs.size() == dys.size() && dys.size() == ddxs.size() && ddxs.size() == ddys.size());
+
+        for (std::size_t i = 0; i < dxs.size(); ++i) {
+            m_curvature.push_back(std::abs(dxs[i] * ddys[i] - dys[i] * ddxs[i]) / std::pow(dxs[i] * dxs[i] + dys[i] * dys[i], 1.5f));
+        }
+    }
+
+    template <std::floating_point T = float>
+    auto normalize_data_into_range(const std::vector<T>& data, T min, T max)
+            -> std::vector<T>
+    {
+        std::vector<T> ret;
+        ret.reserve(data.size());
+
+        for (std::size_t i = 0; i < data.size(); ++i) {
+            const T div = (data[i] - std::ranges::min(data)) / (std::ranges::max(data) - std::ranges::min(data));
+            const T tmp = std::isnan(div) ? 0 : div * (max - min) + min;
+            ret.push_back(tmp);
+        }
+
+        return ret;
+    }
+
+    auto select_data(const std::vector<nova::Vec3f>& data, const std::vector<float>& distances)
+            -> std::pair<std::vector<nova::Vec3f>, std::vector<std::size_t>>
+    {
+        std::vector<nova::Vec3f> ret { data[0] };
+        std::vector<std::size_t> indices { 0 };
+        std::vector<float> _distances{ distances };
+        std::size_t i = 1;
+        float distance = 0;
+
+        while (i < data.size()) {
+            if (distance < _distances[indices.back()]) {
+                distance += (data[i - 1] - data[i]).length();
+                i++;
+            } else {
+                const auto dist_before = distance - (data[i] - data[i - 1]).length();
+                std::size_t idx;
+
+                if (not std::ranges::contains(ret, data[i - 1])) {
+                    _distances[indices.back()] = _distances[indices.back()] - dist_before < distance - _distances[indices.back()] ? dist_before : distance;
+                    ret.push_back(_distances[indices.back()] - dist_before <= distance - _distances[indices.back()] ? data[i - 1] : data[i]);
+                    idx = _distances[indices.back()] - dist_before <= distance - _distances[indices.back()] ? i - 1 : i;
+                } else {
+                    _distances[indices.back()] = distance;
+                    ret.push_back(data[i]);
+                    idx = i;
+                }
+
+                indices.push_back(idx);
+
+                if (indices.back() < i) {
+                    i--;
+                }
+
+                distance = 0;
+            }
+        }
+
+        return {
+            ret,
+            indices
+        };
     }
 };
 
