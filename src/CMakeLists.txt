@@ -13,6 +13,7 @@ target_link_libraries(${EXEC_NAME} PUBLIC
     nova
     # ${OpenCV_LIBS}
     # opencv_gapi
+    range-v3::range-v3
     ${PCL_LIBRARIES}
 )
 
