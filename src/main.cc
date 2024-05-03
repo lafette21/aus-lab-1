@@ -126,82 +126,53 @@ template <std::floating_point T = float>
 
 struct trafo {
     Eigen::Matrix3f R;
-    nova::Vec3f offset1;
-    nova::Vec3f offset2;
-    float scale;
+    Eigen::Vector3f t;
 };
 
-auto register_(const auto& pts1, const auto& pts2)
+/*
+ * @brief   Finding optimal rotation and translation between corresponding 3D points
+ *
+ * https://nghiaho.com/?page_id=671
+ * https://github.com/nghiaho12/rigid_transform_3D/blob/master/rigid_transform_3D.py
+ *
+ */
+auto rigid_transform_3D(const Eigen::MatrixXf& A, const Eigen::MatrixXf& B)
         -> trafo
 {
-    assert(pts1.size() <= pts2.size());
+    assert(A.rows() == B.rows() and A.cols() == B.cols());
+
+    if (A.rows() != 3) {
+        throw std::runtime_error("Matrix A is not 3xN!");
+    }
+
+    if (B.rows() != 3) {
+        throw std::runtime_error("Matrix B is not 3xN!");
+    }
 
     trafo ret;
 
-    const auto num_pts = pts1.size();
+    const Eigen::Vector3f centroid_A = A.rowwise().mean();
+    const Eigen::Vector3f centroid_B = B.rowwise().mean();
 
-    nova::Vec3f offset1{ 0, 0, 0 };
-    nova::Vec3f offset2{ 0, 0, 0 };
+    const Eigen::MatrixXf Am = A.colwise() - centroid_A;
+    const Eigen::MatrixXf Bm = B.colwise() - centroid_B;
 
-    for (std::size_t i = 0; i < num_pts; ++i) {
-        const auto& p1 = pts1[i];
-        const auto& p2 = pts2[i];
-
-        offset1 += p1;
-        offset2 += p2;
-    }
-
-    offset1 /= static_cast<float>(num_pts);
-    offset2 /= static_cast<float>(num_pts);
-
-    ret.offset1 = offset1;
-    ret.offset2 = offset2;
-
-    Eigen::Matrix3f H = Eigen::Matrix3f::Zero();
-
-    for (std::size_t i = 0; i < num_pts; ++i) {
-        const auto p1 = pts1[i] - offset1;
-        const auto p2 = pts2[i] - offset2;
-
-        H(0, 0) += p2.x() * p1.x();
-        H(0, 1) += p2.x() * p1.y();
-        H(0, 2) += p2.x() * p1.z();
-
-        H(1, 0) += p2.y() * p1.x();
-        H(1, 1) += p2.y() * p1.y();
-        H(1, 2) += p2.y() * p1.z();
-
-        H(2, 0) += p2.z() * p1.x();
-        H(2, 1) += p2.z() * p1.y();
-        H(2, 2) += p2.z() * p1.z();
-    }
+    const Eigen::Matrix3f H = Am * Bm.transpose();
 
     Eigen::JacobiSVD<Eigen::Matrix3f> svd(H, Eigen::ComputeFullU | Eigen::ComputeFullV);
 
-    Eigen::Matrix3f u = svd.matrixU();
-    Eigen::Matrix3f vt = svd.matrixV().transpose();
+    const Eigen::Matrix3f Ut = svd.matrixU().transpose();
+    Eigen::Matrix3f V = svd.matrixV();
 
-    ret.R = vt.transpose() * u.transpose();
+    ret.R = V * Ut;
 
-    float num = 0;
-    float denom = 0;
-
-    for (std::size_t i = 0; i < num_pts; ++i) {
-        const auto p1 = pts1[i] - offset1;
-        const auto p2 = pts2[i] - offset2;
-
-        Eigen::Vector3f p2_;
-        p2_(0) = p2.x();
-        p2_(1) = p2.y();
-        p2_(2) = p2.z();
-
-        const auto p2_rot = ret.R * p2_;
-
-        num += p1.x() * p2_rot(0) + p1.y() * p2_rot(1) + p1.z() * p2_rot(2);
-        denom += p2_rot(0) * p2_rot(0) + p2_rot(1) * p2_rot(1) + p2_rot(2) * p2_rot(2);
+    // special reflection case
+    if (ret.R.determinant() < 0) {
+        V.col(2) *= -1;
+        ret.R = V * Ut;
     }
 
-    ret.scale = num / denom;
+    ret.t = -ret.R * centroid_A + centroid_B;
 
     return ret;
 }
@@ -261,8 +232,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
 
         const auto [quarter1, quarter2, quarter3, quarter4] = quarter_cloud(cloud_filtered);
 
-        // pcl::PointCloud<pcl::PointXYZRGB> cylinders;
-
         auto futures = std::array {
             std::async(extract_cylinder, quarter1),
             std::async(extract_cylinder, quarter2),
@@ -276,12 +245,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
         for (auto& f : futures) {
             const auto [params, cylinder, rest] = f.get();
             cyl_params.push_back(params);
-            // cylinders += cylinder;
         }
-
-        // out_cloud += cylinders;
-
-        // pcl::io::savePLYFile(fmt::format("./cyl-{}.ply", idx), cylinders);
 
         for (const auto& p : cyl_params) {
             fmt::print("{} {}\n", p.x(), p.y());
@@ -296,7 +260,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
 
             const auto points = gen_circle(param);
 
-
             for (const auto& p : points) {
                 cylinders.emplace_back(p.x(), p.y(), p.z(), 0, 255, 0);
             }
@@ -304,41 +267,40 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
 
         out_cloud += cylinders;
 
-        // pcl::io::savePLYFile(fmt::format("./cylinders-{}.ply", idx), cylinders);
-
         if (cyl_clouds.size() > 0) {
-            std::vector<nova::Vec3f> pts1, pts2;
-
             const auto& prev_cloud = cyl_clouds.back();
+            const auto min_size = std::min(std::size(prev_cloud), std::size(cylinders));
 
-            for (std::size_t i = 0; i < std::min(std::size(prev_cloud), std::size(cylinders)); ++i) {
-                pts1.emplace_back(prev_cloud[i].x, prev_cloud[i].y, prev_cloud[i].z);
-                pts2.emplace_back(cylinders[i].x, cylinders[i].y, cylinders[i].z);
+            Eigen::MatrixXf A = Eigen::MatrixXf::Zero(3, static_cast<int>(min_size));
+            Eigen::MatrixXf B = Eigen::MatrixXf::Zero(3, static_cast<int>(min_size));
+
+            for (std::size_t i = 0; i < min_size; ++i) {
+                A(0, static_cast<int>(i)) = prev_cloud[i].x;
+                A(1, static_cast<int>(i)) = prev_cloud[i].y;
+                A(2, static_cast<int>(i)) = prev_cloud[i].z;
+
+                B(0, static_cast<int>(i)) = cylinders[i].x;
+                B(1, static_cast<int>(i)) = cylinders[i].y;
+                B(2, static_cast<int>(i)) = cylinders[i].z;
             }
 
-            [[maybe_unused]] const auto trafo = register_(pts1, pts2);
+            const auto trafo = rigid_transform_3D(A, B);
 
             pcl::PointCloud<pcl::PointXYZRGB> out;
 
             for (const auto& p : prev_cloud) {
-                out.emplace_back(p.x - trafo.offset1.x(), p.y - trafo.offset1.y(), p.z - trafo.offset1.z(), 255, 0, 0);
+                const Eigen::Vector3f pt = Eigen::Vector3f{ p.x, p.y, p.z };
+                const auto ptt = (trafo.R * pt) + trafo.t;
+                out.emplace_back(ptt.x(), ptt.y(), ptt.z(), 255, 0, 0);
             }
 
             for (const auto& p : cylinders) {
-                Eigen::Vector3f pt;
-                pt(0) = p.x - trafo.offset2.x();
-                pt(1) = p.y - trafo.offset2.y();
-                pt(2) = p.z - trafo.offset2.z();
-
-                const auto pp = (trafo.R * pt) * trafo.scale;
-
-                out.emplace_back(pp(0), pp(1), pp(2), 0, 255, 0);
+                out.push_back(p);
             }
 
             pcl::io::savePLYFile("./registered.ply", out);
 
             break;
-            // throw std::runtime_error("We'll stop here.");
         }
 
         cyl_clouds.push_back(cylinders);
