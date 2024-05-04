@@ -15,6 +15,7 @@
 #include <fstream>
 #include <future>
 #include <numbers>
+#include <random>
 #include <ranges>
 #include <span>
 #include <string>
@@ -171,7 +172,29 @@ std::optional<hit_record> hit(const sphere& sphere, const ray& r) {
     return ret;
 }
 
-auto ray_cast(const ray& r, const std::vector<primitive>& primitives)
+// TODO(refact): Nova to handle normal_distribution beside uniform
+auto random_noise(float sigma) {
+    std::random_device rd{};
+    std::mt19937 gen{ rd() };
+
+    // values near the mean are the most likely
+    // standard deviation affects the dispersion of generated values from the mean
+    std::normal_distribution distribution{ 0.f, sigma };
+
+    return distribution(gen);
+}
+
+auto distort(const nova::Vec3f& point, const ray& r, float sigma)
+        -> nova::Vec3f
+{
+    const auto dist = (point - r.origin).length();
+    const auto noise = random_noise(sigma);
+    const auto distorted_dist = dist + noise;
+
+    return r.origin + r.direction * distorted_dist;
+}
+
+auto ray_cast(const ray& r, const std::vector<primitive>& primitives, float sigma)
         -> std::vector<nova::Vec3f>
 {
     std::vector<nova::Vec3f> ret;
@@ -190,7 +213,7 @@ auto ray_cast(const ray& r, const std::vector<primitive>& primitives)
             const auto& hit_point = hit_rec->point;
             // Filter out points behind the lidar
             if (nova::dot(hit_point - r.origin, r.direction) >= 0) {
-                ret.push_back(hit_point);
+                ret.push_back(distort(hit_point, r, sigma));
             }
         }
     }
@@ -230,6 +253,8 @@ public:
             orientation += 2.f * std::numbers::pi_v<float>;
         }
 
+        const auto sigma = m_config.lookup<float>("accuracy.value");
+
         for (auto angle_h : m_angles_hor) {
             angle_h = deg2rad(angle_h);
             angle_h += orientation;
@@ -247,7 +272,7 @@ public:
                     std::sin(angle_v)
                 };
 
-                result.push_back(closest_to(m_origin, ray_cast(ray{ m_origin, direction }, objects)));
+                result.push_back(closest_to(m_origin, ray_cast(ray{ m_origin, direction }, objects, sigma)));
             }
         }
 
@@ -388,7 +413,6 @@ public:
         setup();
 
         const auto origin = m_path[0];
-        const auto first_angle = std::atan2(m_path[1].x() - origin.x(), m_path[1].y() - origin.y());
 
         for (auto& p : m_path) {
             p -= origin;
@@ -477,7 +501,9 @@ public:
 
         for (const auto& [i, pose] : std::views::enumerate(sparse_poses)) {
             m_lidar.replace({ pose.position.x(), pose.position.y(), m_lidar.pos().z() });
-            const auto data = m_lidar.scan(m_objects, pose.orientation.z());
+            const auto data = m_lidar.scan(m_objects, pose.orientation.z())
+                            | std::views::transform([pose](const auto& elem) { return nova::Vec3f{ elem.x() - pose.position.x(), elem.y() - pose.position.y(), elem.z() }; })
+                            | ranges::to<std::vector>();
             print(fmt::format("./out/l_out_{}.xyz", i + 1), data);
         }
     }

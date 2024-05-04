@@ -31,7 +31,11 @@
                 "partition_size": 60,
                 "value": 1200
             },
-            "firing_cycle": 55.296e-6
+            "firing_cycle": 55.296e-6,
+            "accuracy": {
+                "value": 0.01,
+                "_unit": "m"
+            }
         }
     }
 }
