@@ -504,7 +504,7 @@ public:
             const auto data = m_lidar.scan(m_objects, pose.orientation.z())
                             | std::views::transform([pose](const auto& elem) { return nova::Vec3f{ elem.x() - pose.position.x(), elem.y() - pose.position.y(), elem.z() }; })
                             | ranges::to<std::vector>();
-            print(fmt::format("./out/l_out_{}.xyz", i + 1), data);
+            print(fmt::format("./out/test_fn{}.xyz", i + 1), data);
         }
     }
 
