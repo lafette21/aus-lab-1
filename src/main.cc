@@ -23,6 +23,7 @@
 #include <numbers>
 #include <ranges>
 #include <span>
+#include <utility>
 
 
 inline auto& init(const std::string& name) {
@@ -208,6 +209,10 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
     pcl::PointCloud<pcl::PointXYZRGB> out_cloud;
 
     std::vector<pcl::PointCloud<pcl::PointXYZRGB>> cyl_clouds;
+    std::vector<std::pair<std::size_t, nova::Vec4f>> prev_cyl_params;
+    Eigen::Matrix4f trafo = Eigen::Matrix4f::Identity();
+
+    std::ofstream oF("./out.xyz");
 
     for (const auto& [idx, cloud] : std::views::enumerate(clouds)) {
         spdlog::info("Cloud size: {}", cloud.size());
@@ -239,39 +244,76 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
         auto futures = std::array {
             std::async(extract_cylinder, quarter1),
             std::async(extract_cylinder, quarter2),
-            // std::async(extract_cylinder, quarter3),
+            std::async(extract_cylinder, quarter3),
             std::async(extract_cylinder, quarter4)
         };
 
-        std::vector<nova::Vec4f> cyl_params;
+        std::vector<std::pair<std::size_t, nova::Vec4f>> cyl_params;
         cyl_params.reserve(4);
 
-        for (auto& f : futures) {
+        for (auto [id, f] : std::views::enumerate(futures)) {
             const auto [params, cylinder, rest] = f.get();
-            cyl_params.push_back(params);
-        }
 
-        for (const auto& p : cyl_params) {
-            fmt::print("{} {}\n", p.x(), p.y());
-        }
-
-        pcl::PointCloud<pcl::PointXYZRGB> cylinders;
-
-        for (const auto& param : cyl_params) {
-            if (std::isnan(param.x()) or std::isnan(param.y()) or std::isnan(param.z()) or std::isnan(param.w())) {
+            if (std::isnan(params.x()) or std::isnan(params.y()) or std::isnan(params.z()) or std::isnan(params.w())) {
                 continue;
             }
 
-            const auto points = gen_circle(param);
-
-            for (const auto& p : points) {
-                cylinders.emplace_back(p.x(), p.y(), p.z(), 0, 255, 0);
-            }
+            cyl_params.push_back(std::make_pair(id, params));
         }
 
-        out_cloud += cylinders;
+        for (const auto& p : cyl_params) {
+            fmt::print("{} {} {}\n", p.first, p.second.x(), p.second.y());
+        }
 
-        if (cyl_clouds.size() > 0) {
+        // pcl::PointCloud<pcl::PointXYZRGB> cylinders;
+
+        // for (const auto& param : cyl_params) {
+            // if (std::isnan(param.x()) or std::isnan(param.y()) or std::isnan(param.z()) or std::isnan(param.w())) {
+                // continue;
+            // }
+
+            // const auto points = gen_circle(param);
+
+            // for (const auto& p : points) {
+                // cylinders.emplace_back(p.x(), p.y(), p.z(), 0, 255, 0);
+            // }
+        // }
+
+        // out_cloud += cylinders;
+
+        if (prev_cyl_params.size() > 0) {
+            std::vector<nova::Vec4f> prev_vec;
+            std::vector<nova::Vec4f> curr_vec;
+
+            for (const auto& elem : cyl_params) {
+                const auto it = std::ranges::find(prev_cyl_params, elem.first, &std::pair<std::size_t, nova::Vec4f>::first);
+
+                if (it != std::end(prev_cyl_params)) {
+                    prev_vec.push_back(it->second);
+                    curr_vec.push_back(elem.second);
+                }
+            }
+
+            // for (const auto& p : prev_vec) {
+                // fmt::print("{} {}\n", p.x(), p.y());
+            // }
+
+            // for (const auto& p : curr_vec) {
+                // fmt::print("{} {}\n", p.x(), p.y());
+            // }
+
+            pcl::PointCloud<pcl::PointXYZRGB> cylinders;
+
+            for (const auto& param : curr_vec) {
+                const auto points = gen_circle(param);
+
+                for (const auto& p : points) {
+                    cylinders.emplace_back(p.x(), p.y(), p.z(), 0, 255, 0);
+                }
+            }
+
+            out_cloud += cylinders;
+
             const auto& prev_cloud = cyl_clouds.back();
             const auto min_size = std::min(std::size(prev_cloud), std::size(cylinders));
 
@@ -288,26 +330,45 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
                 B(2, static_cast<int>(i)) = cylinders[i].z;
             }
 
-            const auto trafo = rigid_transform_3D(A, B);
+            const auto new_trafo_tmp = rigid_transform_3D(B, A);
+
+            Eigen::Matrix4f new_trafo = Eigen::Matrix4f::Identity();
+            new_trafo.block<3, 3>(0, 0) = new_trafo_tmp.R;
+            new_trafo.block<3, 1>(0, 3) = new_trafo_tmp.t;
+
+            trafo = trafo * new_trafo;
 
             pcl::PointCloud<pcl::PointXYZRGB> out;
 
-            for (const auto& p : prev_cloud) {
-                const Eigen::Vector3f pt = Eigen::Vector3f{ p.x, p.y, p.z };
-                const auto ptt = (trafo.R * pt) + trafo.t;
+            for (const auto& p : cylinders) {
+                const Eigen::Vector4f pt = Eigen::Vector4f{ p.x, p.y, p.z, 1.0f };
+                const Eigen::Vector4f ptt = trafo * pt;
                 out.emplace_back(ptt.x(), ptt.y(), ptt.z(), 255, 0, 0);
             }
 
-            for (const auto& p : cylinders) {
-                out.push_back(p);
+            for (const auto& p : prev_cloud) {
+                out.emplace_back(p.x, p.y, p.z, 0, 255, 0);
             }
 
-            pcl::io::savePLYFile("./registered.ply", out);
+            pcl::io::savePLYFile(fmt::format("./registered-{}.ply", idx), out);
 
-            break;
+            cyl_clouds.push_back(cylinders);
+        } else {
+            pcl::PointCloud<pcl::PointXYZRGB> cylinders;
+
+            for (const auto& [id, params] : cyl_params) {
+                const auto points = gen_circle(params);
+
+                for (const auto& p : points) {
+                    cylinders.emplace_back(p.x(), p.y(), p.z(), 0, 255, 0);
+                }
+            }
+
+            out_cloud += cylinders;
+            cyl_clouds.push_back(cylinders);
         }
 
-        cyl_clouds.push_back(cylinders);
+        prev_cyl_params = cyl_params;
     }
 
     pcl::io::savePLYFile("./raw.ply", out_cloud);
