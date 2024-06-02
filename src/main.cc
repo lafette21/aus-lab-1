@@ -3,6 +3,7 @@
 
 #include <Eigen/Core>
 #include <Eigen/Dense>
+#include <charconv>
 #include <nova/vec.h>
 #include <nova/utils.h>
 #include <fmt/format.h>
@@ -181,17 +182,20 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
     [[maybe_unused]] auto& logger = init("logger");
 
     const auto args = std::span<char*>(argv, static_cast<std::size_t>(argc))
-                    | std::views::transform([](const auto& arg) { return std::string_view {arg}; });
+                    | std::views::transform([](const auto& arg) { return std::string_view{ arg }; });
 
-    constexpr std::size_t From = 165;
-    constexpr std::size_t To = 167;
+    std::size_t from = 0;
+    std::size_t to = 0;
+
+    std::from_chars(args[2].begin(), args[2].begin() + args[2].size(), from);
+    std::from_chars(args[3].begin(), args[3].begin() + args[3].size(), to);
 
     std::vector<pcl::PointCloud<pcl::PointXYZRGB>> clouds;
-    clouds.reserve(To - From);
+    clouds.reserve(to - from);
 
     spdlog::info("Reading cloud(s)");
 
-    for (std::size_t i = From; i < To; ++i) {
+    for (std::size_t i = from; i < to; ++i) {
         const auto cloud = read_file<lidar_data_parser>(
             (std::filesystem::path(args[1]) / fmt::format("test_fn{}.xyz", i)).string()
         ).value();
@@ -235,7 +239,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
         auto futures = std::array {
             std::async(extract_cylinder, quarter1),
             std::async(extract_cylinder, quarter2),
-            std::async(extract_cylinder, quarter3),
+            // std::async(extract_cylinder, quarter3),
             std::async(extract_cylinder, quarter4)
         };
 
