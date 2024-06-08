@@ -64,10 +64,6 @@ public:
 
         orientations.push_back(orientations.back());
 
-        // matplot::axis({ -matplot::inf, matplot::inf, -1, +1});
-        // matplot::plot(orientations, ".");
-        // matplot::show();
-
         const auto poses = std::views::zip(m_path, orientations)
                          | std::views::transform([](const auto& elem) { const auto& [pos, theta] = elem; return pose{ pos, nova::Vec3f{ 0, 0, theta } }; })
                          | ranges::to<std::vector>();
@@ -82,9 +78,6 @@ public:
                              | std::views::transform([motion_sampling](const auto& elem) { return elem * (1.f / motion_sampling); })
                              | ranges::to<std::vector>();
 
-        // matplot::plot(velocities, ".");
-        // matplot::show();
-
         const auto [sparse_path, indices] = select_data(m_path, distances);
 
         const auto xs = sparse_path
@@ -94,10 +87,6 @@ public:
         const auto ys = sparse_path
                       | std::views::transform([](const auto& elem) { return elem.y(); })
                       | ranges::to<std::vector>();
-
-        // matplot::axis({ -20, 20, -20, 20 });
-        // matplot::plot(xs, ys, ".r");
-        // matplot::show();
 
         const auto sparse_poses = [&poses, &indices] () -> std::vector<pose> {
             std::vector<pose> ret;
@@ -140,9 +129,6 @@ private:
         }
 
         const auto [xs, ys, dxs, dys, ddxs, ddys] = interpolate_and_differentiate(_xs, _ys, m_config.lookup<std::size_t>("simulation.path.num_interp_points"));
-
-        // matplot::plot(xs, ys, ".b");
-        // matplot::show();
 
         const auto path = std::views::zip(xs, ys)
                         | std::views::transform([](const auto& elem) { const auto& [x, y] = elem; return nova::Vec3f{ x, y, 0 }; })
