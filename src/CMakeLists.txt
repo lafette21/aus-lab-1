@@ -16,3 +16,5 @@ target_link_libraries(${EXEC_NAME} PUBLIC
 )
 
 code_analysis(${EXEC_NAME} PRIVATE)
+
+add_subdirectory(simulator)

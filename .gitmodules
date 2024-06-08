@@ -1,0 +1,3 @@
+[submodule "deps/nova"]
+	path = deps/nova
+	url = https://github.com/GK72/nova-cpp
