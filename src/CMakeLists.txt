@@ -66,3 +66,5 @@ target_link_libraries(cluster PUBLIC
     # opencv_gapi
     ${PCL_LIBRARIES}
 )
+
+add_subdirectory(simulator)
