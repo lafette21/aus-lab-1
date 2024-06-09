@@ -1,3 +1,19 @@
+add_executable(poc
+    poc.cc
+)
+
+target_include_directories(poc PUBLIC
+    ${PCL_INCLUDE_DIRS}
+)
+
+target_link_libraries(poc PUBLIC
+    fmt::fmt-header-only
+    nova
+    ${PCL_LIBRARIES}
+)
+
+code_analysis(poc PRIVATE)
+
 set(EXEC_NAME ph)
 
 add_executable(${EXEC_NAME}
@@ -11,8 +27,6 @@ target_include_directories(${EXEC_NAME} PUBLIC
 target_link_libraries(${EXEC_NAME} PUBLIC
     fmt::fmt-header-only
     nova
-    # ${OpenCV_LIBS}
-    # opencv_gapi
     range-v3::range-v3
     ${PCL_LIBRARIES}
 )
@@ -30,8 +44,6 @@ target_include_directories(register PUBLIC
 target_link_libraries(register PUBLIC
     fmt::fmt-header-only
     nova
-    # ${OpenCV_LIBS}
-    # opencv_gapi
     ${PCL_LIBRARIES}
 )
 
@@ -46,8 +58,6 @@ target_include_directories(circle PUBLIC
 target_link_libraries(circle PUBLIC
     fmt::fmt-header-only
     nova
-    # ${OpenCV_LIBS}
-    # opencv_gapi
     ${PCL_LIBRARIES}
 )
 
@@ -62,8 +72,6 @@ target_include_directories(cluster PUBLIC
 target_link_libraries(cluster PUBLIC
     fmt::fmt-header-only
     nova
-    # ${OpenCV_LIBS}
-    # opencv_gapi
     ${PCL_LIBRARIES}
 )
 
