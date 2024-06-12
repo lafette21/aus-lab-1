@@ -7,6 +7,7 @@
 #include <spdlog/spdlog.h>
 
 #include <filesystem>
+#include <future>
 #include <numbers>
 #include <ranges>
 
@@ -39,6 +40,51 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
         logging::info("Cluster size: {}", cl.indices.size());
     }
 
+    const auto point_clouds = extract_clusters(filtered, clusters);
+
+    logging::info("Point clouds extracted: {}", point_clouds.size());
+
+    for (const auto& elem : point_clouds) {
+        logging::info("Cloud size: {}", elem.size());
+    }
+
     pcl::io::savePLYFile("./downsampled.ply", downsampled);
     pcl::io::savePLYFile("./filtered.ply", filtered);
+
+    pcl::PointCloud<pcl::PointXYZRGB> out;
+    std::vector<std::future<std::tuple<nova::Vec4f, pcl::PointCloud<pcl::PointXYZRGB>, std::vector<nova::Vec3f>>>> futures;
+
+    for (const auto& elem : point_clouds) {
+        futures.push_back(std::async(extract_cylinder, elem));
+    }
+
+    std::vector<nova::Vec4f> cyl_params;
+
+    for (auto& f : futures) {
+        const auto [params, cylinder, rest] = f.get();
+
+        if (std::isnan(params.x()) or std::isnan(params.y()) or std::isnan(params.z()) or std::isnan(params.w())) {
+            continue;
+        }
+
+        cyl_params.push_back(params);
+    }
+
+    for (const auto& p : cyl_params) {
+        fmt::print("{} {}\n", p.x(), p.y());
+    }
+
+    for (const auto& param : cyl_params) {
+        pcl::PointCloud<pcl::PointXYZRGB> circle;
+
+        const auto points = gen_circle(param);
+
+        for (const auto& p : points) {
+            circle.emplace_back(p.x(), p.y(), p.z(), 0, 255, 0);
+        }
+
+        out += circle;
+    }
+
+    pcl::io::savePLYFile("./circles.ply", out);
 }
