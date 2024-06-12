@@ -1,73 +1,92 @@
 #ifndef UTILS_HH
 #define UTILS_HH
 
-#include <fmt/format.h>
-#include <pcl/point_cloud.h>
+#include <pcl/common/common.h>
+#include <pcl/common/transforms.h>
+#include <pcl/features/normal_3d.h>
+#include <pcl/filters/filter_indices.h> // for pcl::removeNaNFromPointCloud
+#include <pcl/filters/extract_indices.h>
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/io/ply_io.h>
 #include <pcl/point_types.h>
-
-#include <expected>
-#include <filesystem>
-#include <fstream>
-#include <sstream>
-#include <string>
+#include <pcl/search/kdtree.h>
+#include <pcl/search/search.h>
+#include <pcl/segmentation/region_growing.h>
+#include <pcl/segmentation/sac_segmentation.h>
 
 
-struct measurement {
-    pcl::PointCloud<pcl::PointXYZRGB> cloud;
-};
+[[nodiscard]] inline auto downsample(const pcl::PointCloud<pcl::PointXYZRGB>& cloud) {
+    pcl::PointCloud<pcl::PointXYZRGB> ret;
 
-struct error {
-    std::string msg;
-    operator std::string() { return msg; }
-};
+    pcl::VoxelGrid<pcl::PointXYZRGB> vg;
+    vg.setInputCloud(cloud.makeShared());
+    vg.setLeafSize(0.07f, 0.07f, 0.07f); // TODO: Need a good param - Set the leaf size (adjust as needed)
+    vg.filter(ret);
 
-struct def_parser {
-    [[nodiscard]] std::string operator()(std::ifstream&& iF) {
-        std::stringstream ss;
-        for (std::string line; std::getline(iF, line); ) {
-            ss << line << '\n';
-        }
-        return ss.str();
-    }
-};
-
-struct lidar_data_parser {
-    [[nodiscard]] pcl::PointCloud<pcl::PointXYZRGB> operator()(std::ifstream&& iF) {
-        pcl::PointCloud<pcl::PointXYZRGB> result;
-        std::stringstream ss;
-        for (std::string line; std::getline(iF, line); ) {
-            ss << line << '\n';
-            pcl::PointXYZRGB point;
-            float dummy;
-            ss >> point.x >> point.y >> point.z >> dummy >> dummy >> dummy;
-            result.push_back(point);
-            ss.clear();
-        }
-        return result;
-    }
-};
-
-template <typename Parser = def_parser>
-[[nodiscard]] auto read_file(std::string_view path, Parser&& parser = {})
-        -> std::expected<std::remove_cvref_t<std::invoke_result_t<Parser, std::ifstream>>, error>
-{
-    const auto fs = std::filesystem::path(path);
-    if (not std::filesystem::is_regular_file(fs)) {
-        return std::unexpected<error>(fmt::format("{} is not a regular file!", std::filesystem::absolute(fs).string()));
-    }
-
-    return parser(std::ifstream(fs));
+    return ret;
 }
 
-[[nodiscard]] measurement read_measurement(
-    std::size_t id,
-    std::string_view points_path
-) {
-    const pcl::PointCloud<pcl::PointXYZRGB> cloud = read_file<lidar_data_parser>((std::filesystem::path(points_path) / fmt::format("test_fn{}.xyz", id)).string()).value();
+[[nodiscard]] inline auto filter_planes(const pcl::PointCloud<pcl::PointXYZRGB>& cloud) {
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr _cloud = cloud.makeShared();
+    pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
+    pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
+    // Create the segmentation object
+    pcl::SACSegmentation<pcl::PointXYZRGB> seg;
+    // Optional
+    // seg.setOptimizeCoefficients(false);
+    // Mandatory
+    seg.setModelType(pcl::SACMODEL_PLANE);
+    seg.setMethodType(pcl::SAC_RANSAC);
+    seg.setDistanceThreshold(0.1);
 
-    return {
-        .cloud = cloud,
-    };
+    seg.setInputCloud(_cloud);
+    seg.segment(*inliers, *coefficients);
+
+    while (inliers->indices.size() > 500) {
+        // extract inliers
+        pcl::ExtractIndices<pcl::PointXYZRGB> extractor;
+        extractor.setInputCloud(_cloud);
+        extractor.setIndices(inliers);
+        extractor.setNegative(true); // extract the inliers in consensus model (the part to be removed from point cloud)
+        extractor.filter(*_cloud); // cloud_inliers contains the found plane
+
+        seg.segment(*inliers, *coefficients);
+    }
+
+    return *_cloud;
+}
+
+[[nodiscard]] inline auto cluster(const pcl::PointCloud<pcl::PointXYZRGB>& cloud) {
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr _cloud = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(cloud);
+    pcl::search::Search<pcl::PointXYZRGB>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGB>);
+    pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
+    pcl::NormalEstimation<pcl::PointXYZRGB, pcl::Normal> normal_estimator;
+    normal_estimator.setSearchMethod(tree);
+    normal_estimator.setInputCloud(_cloud);
+    normal_estimator.setKSearch(50);
+    normal_estimator.compute(*normals);
+
+    pcl::IndicesPtr indices(new std::vector<int>);
+    pcl::removeNaNFromPointCloud(*_cloud, *indices);
+
+    pcl::RegionGrowing<pcl::PointXYZRGB, pcl::Normal> reg;
+    reg.setMinClusterSize(50);
+    reg.setMaxClusterSize(1000000);
+
+    reg.setSearchMethod(tree);
+    reg.setNumberOfNeighbours(30);
+    reg.setInputCloud(_cloud);
+    reg.setIndices(indices);
+    reg.setInputNormals(normals);
+
+    reg.setSmoothnessThreshold(18.0f / 180.0f * std::numbers::pi_v<float>);
+    reg.setCurvatureThreshold(1.0);
+
+    std::vector<pcl::PointIndices> clusters;
+    reg.extract(clusters);
+    pcl::io::savePLYFile("./clusters.ply", *reg.getColoredCloud());
+
+    return clusters;
 }
 
 #endif // UTILS_HH
