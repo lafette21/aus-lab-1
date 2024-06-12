@@ -1,67 +1,32 @@
+#include "nova/vec.h"
 #include "simulator/logging.hh"
-#include "types.hh"
 #include "utils.hh"
+#include "types.hh"
 
-#include <Eigen/Core>
-#include <Eigen/Dense>
-#include <charconv>
-#include "nova/io.h"
-#include <nova/vec.h>
-#include <nova/utils.h>
 #include <fmt/format.h>
-#include <pcl/common/common.h>
-#include <pcl/common/transforms.h>
-#include <pcl/filters/radius_outlier_removal.h>
-#include <pcl/filters/voxel_grid.h>
-#include <pcl/io/ply_io.h>
-#include <pcl/point_types.h>
-#include <range/v3/range/conversion.hpp>
+#include <nova/io.h>
 #include <spdlog/spdlog.h>
 
-#include <array>
-#include <concepts>
-#include <cstdlib>
+#include <filesystem>
 #include <future>
 #include <numbers>
 #include <ranges>
-#include <span>
-#include <utility>
 
 
-[[nodiscard]] auto quarter_cloud(const pcl::PointCloud<pcl::PointXYZRGB>& cloud)
-        -> std::array<pcl::PointCloud<pcl::PointXYZRGB>, 4>
+auto closest_to(const nova::Vec2f& point, const std::vector<nova::Vec2f>& points)
+        -> nova::Vec2f
 {
-    pcl::PointXYZRGB min_pt, max_pt;
-    pcl::getMinMax3D(cloud, min_pt, max_pt);
+    nova::Vec2f closest;
+    auto min_dist = std::numeric_limits<float>::max();
 
-    // Calculate the midpoint along X and Y axes
-    float mid_x = (min_pt.x + max_pt.x) / 2.0f;
-    float mid_y = (min_pt.y + max_pt.y) / 2.0f;
-
-    pcl::PointCloud<pcl::PointXYZRGB> quarter1;
-    pcl::PointCloud<pcl::PointXYZRGB> quarter2;
-    pcl::PointCloud<pcl::PointXYZRGB> quarter3;
-    pcl::PointCloud<pcl::PointXYZRGB> quarter4;
-
-    // Split the point cloud into four quarters based on the midpoint
-    for (const auto& point : cloud) {
-        if (point.x < mid_x && point.y < mid_y) {
-            quarter1.push_back(point);
-        } else if (point.x >= mid_x && point.y < mid_y) {
-            quarter2.push_back(point);
-        } else if (point.x < mid_x && point.y >= mid_y) {
-            quarter3.push_back(point);
-        } else {
-            quarter4.push_back(point);
+    for (const auto& p : points) {
+        if (const auto dist = (point - p).length(); dist < min_dist) {
+            min_dist = dist;
+            closest = p;
         }
     }
 
-    return {
-        quarter1,
-        quarter2,
-        quarter3,
-        quarter4
-    };
+    return closest;
 }
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
@@ -79,7 +44,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
     std::vector<pcl::PointCloud<pcl::PointXYZRGB>> clouds;
     clouds.reserve(to - from);
 
-    spdlog::info("Reading cloud(s)");
+    logging::info("Reading cloud(s)");
 
     for (std::size_t i = from; i < to; ++i) {
         const auto cloud = nova::read_file<lidar_data_parser>(
@@ -88,119 +53,87 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
         clouds.push_back(cloud);
     }
 
-    spdlog::info("Read {} cloud(s)", clouds.size());
-    spdlog::info("Processing cloud(s)");
+    logging::info("Read {} cloud(s)", clouds.size());
+    logging::info("Processing cloud(s)");
 
-    pcl::PointCloud<pcl::PointXYZRGB> out_cloud;
-
-    std::vector<pcl::PointCloud<pcl::PointXYZRGB>> cyl_clouds;
-    std::vector<std::pair<std::size_t, nova::Vec4f>> prev_cyl_params;
+    pcl::PointCloud<pcl::PointXYZRGB> out;
+    std::vector<pcl::PointCloud<pcl::PointXYZRGB>> circle_clouds;
+    std::vector<nova::Vec4f> prev_cyl_params;
     Eigen::Matrix4f trafo = Eigen::Matrix4f::Identity();
 
-    std::ofstream oF("./out.xyz");
-
     for (const auto& [idx, cloud] : std::views::enumerate(clouds)) {
-        spdlog::info("Cloud size: {}", cloud.size());
+        logging::info("Cloud size: {}", cloud.size());
 
-        pcl::PointCloud<pcl::PointXYZRGB> tmp_cloud;
-        pcl::VoxelGrid<pcl::PointXYZRGB> vg;
-        vg.setInputCloud(cloud.makeShared());
-        vg.setLeafSize(0.07f, 0.07f, 0.07f); // TODO: Need a good param - Set the leaf size (adjust as needed)
-        vg.filter(tmp_cloud);
+        const auto downsampled = downsample(cloud);
+        const auto filtered = filter_planes(downsampled);
+        const auto clusters = cluster(filtered);
 
-        pcl::PointCloud<pcl::PointXYZRGB> cloud_filtered;
-        pcl::RadiusOutlierRemoval<pcl::PointXYZRGB> ror;
-        ror.setInputCloud(tmp_cloud.makeShared());
-        ror.setRadiusSearch(0.7); // TODO: Need a good param
-        ror.setMinNeighborsInRadius(40); // TODO: Need a good param
-        ror.filter(cloud_filtered);
+        logging::info("Clusters found: {}", clusters.size());
 
-        // TODO: This might not be needed
-        // auto tmp = cloud_filtered
-                 // | std::views::transform([](const auto& elem) { return nova::Vec3f { elem.x, elem.y, elem.z }; })
-                 // | std::views::filter([](const auto& elem) { return elem != nova::Vec3f { 0, 0, 0 }; });
+        for (const auto& cl : clusters) {
+            logging::info("Cluster size: {}", cl.indices.size());
+        }
 
-        // std::vector<nova::Vec3f> points(std::begin(tmp), std::end(tmp));
+        const auto point_clouds = extract_clusters(filtered, clusters);
 
-        spdlog::info("Filtered cloud size: {}", cloud_filtered.size());
+        logging::info("Point clouds extracted: {}", point_clouds.size());
 
-        const auto [quarter1, quarter2, quarter3, quarter4] = quarter_cloud(cloud_filtered);
+        for (const auto& elem : point_clouds) {
+            logging::info("Cloud size: {}", elem.size());
+        }
 
-        auto futures = std::array {
-            std::async(extract_cylinder, quarter1),
-            std::async(extract_cylinder, quarter2),
-            std::async(extract_cylinder, quarter3),
-            std::async(extract_cylinder, quarter4)
-        };
+        std::vector<std::future<std::tuple<nova::Vec4f, pcl::PointCloud<pcl::PointXYZRGB>, std::vector<nova::Vec3f>>>> futures;
 
-        std::vector<std::pair<std::size_t, nova::Vec4f>> cyl_params;
-        cyl_params.reserve(4);
+        for (const auto& elem : point_clouds) {
+            futures.push_back(std::async(extract_cylinder, elem));
+        }
 
-        for (auto [id, f] : std::views::enumerate(futures)) {
+        std::vector<nova::Vec4f> cyl_params;
+
+        for (auto& f : futures) {
             const auto [params, cylinder, rest] = f.get();
 
             if (std::isnan(params.x()) or std::isnan(params.y()) or std::isnan(params.z()) or std::isnan(params.w())) {
                 continue;
             }
 
-            cyl_params.push_back(std::make_pair(id, params));
+            cyl_params.push_back(params);
         }
 
         for (const auto& p : cyl_params) {
-            fmt::print("{} {} {}\n", p.first, p.second.x(), p.second.y());
+            fmt::print("{} {}\n", p.x(), p.y());
         }
 
-        // pcl::PointCloud<pcl::PointXYZRGB> cylinders;
-
-        // for (const auto& param : cyl_params) {
-            // if (std::isnan(param.x()) or std::isnan(param.y()) or std::isnan(param.z()) or std::isnan(param.w())) {
-                // continue;
-            // }
-
-            // const auto points = gen_circle(param);
-
-            // for (const auto& p : points) {
-                // cylinders.emplace_back(p.x(), p.y(), p.z(), 0, 255, 0);
-            // }
-        // }
-
-        // out_cloud += cylinders;
-
         if (prev_cyl_params.size() > 0) {
-            std::vector<nova::Vec4f> prev_vec;
-            std::vector<nova::Vec4f> curr_vec;
+            std::vector<nova::Vec4f> curr_cyl_params;
 
             for (const auto& elem : cyl_params) {
-                const auto it = std::ranges::find(prev_cyl_params, elem.first, &std::pair<std::size_t, nova::Vec4f>::first);
+                const auto prev_cyl_centers = prev_cyl_params
+                                            | std::views::transform([](const auto& elem) { return nova::Vec2f{ elem.x(), elem.y() }; })
+                                            | ranges::to<std::vector>();
+                const auto closest = closest_to({ elem.x(), elem.y() }, prev_cyl_centers);
 
-                if (it != std::end(prev_cyl_params)) {
-                    prev_vec.push_back(it->second);
-                    curr_vec.push_back(elem.second);
+                constexpr auto Threshold = 0.5f;
+
+                if ((closest - nova::Vec2f{ elem.x(), elem.y() }).length() < Threshold) {
+                    curr_cyl_params.push_back(elem);
                 }
             }
 
-            // for (const auto& p : prev_vec) {
-                // fmt::print("{} {}\n", p.x(), p.y());
-            // }
+            pcl::PointCloud<pcl::PointXYZRGB> circles;
 
-            // for (const auto& p : curr_vec) {
-                // fmt::print("{} {}\n", p.x(), p.y());
-            // }
-
-            pcl::PointCloud<pcl::PointXYZRGB> cylinders;
-
-            for (const auto& param : curr_vec) {
-                const auto points = gen_circle(param);
+            for (const auto& params : curr_cyl_params) {
+                const auto points = gen_circle(params);
 
                 for (const auto& p : points) {
-                    cylinders.emplace_back(p.x(), p.y(), p.z(), 0, 255, 0);
+                    circles.emplace_back(p.x(), p.y(), p.z(), 0, 255, 0);
                 }
             }
 
-            out_cloud += cylinders;
+            out += circles;
 
-            const auto& prev_cloud = cyl_clouds.back();
-            const auto min_size = std::min(std::size(prev_cloud), std::size(cylinders));
+            const auto& prev_cloud = circle_clouds.back();
+            const auto min_size = std::min(std::size(prev_cloud), std::size(circles));
 
             Eigen::MatrixXf A = Eigen::MatrixXf::Zero(3, static_cast<int>(min_size));
             Eigen::MatrixXf B = Eigen::MatrixXf::Zero(3, static_cast<int>(min_size));
@@ -210,9 +143,9 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
                 A(1, static_cast<int>(i)) = prev_cloud[i].y;
                 A(2, static_cast<int>(i)) = prev_cloud[i].z;
 
-                B(0, static_cast<int>(i)) = cylinders[i].x;
-                B(1, static_cast<int>(i)) = cylinders[i].y;
-                B(2, static_cast<int>(i)) = cylinders[i].z;
+                B(0, static_cast<int>(i)) = circles[i].x;
+                B(1, static_cast<int>(i)) = circles[i].y;
+                B(2, static_cast<int>(i)) = circles[i].z;
             }
 
             const auto new_trafo_tmp = rigid_transform_3D(B, A);
@@ -223,40 +156,38 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
 
             trafo = trafo * new_trafo;
 
-            pcl::PointCloud<pcl::PointXYZRGB> out;
+            pcl::PointCloud<pcl::PointXYZRGB> registered;
 
-            for (const auto& p : cylinders) {
+            for (const auto& p : circles) {
                 const Eigen::Vector4f pt = Eigen::Vector4f{ p.x, p.y, p.z, 1.0f };
                 const Eigen::Vector4f ptt = trafo * pt;
-                out.emplace_back(ptt.x(), ptt.y(), ptt.z(), 255, 0, 0);
+                registered.emplace_back(ptt.x(), ptt.y(), ptt.z(), 255, 0, 0);
             }
 
             for (const auto& p : prev_cloud) {
-                out.emplace_back(p.x, p.y, p.z, 0, 255, 0);
+                registered.emplace_back(p.x, p.y, p.z, 0, 255, 0);
             }
 
-            pcl::io::savePLYFile(fmt::format("./registered-{}.ply", idx), out);
+            pcl::io::savePLYFile(fmt::format("./registered-{}.ply", idx), registered);
 
-            cyl_clouds.push_back(cylinders);
+            circle_clouds.push_back(circles);
         } else {
-            pcl::PointCloud<pcl::PointXYZRGB> cylinders;
+            pcl::PointCloud<pcl::PointXYZRGB> circles;
 
-            for (const auto& [id, params] : cyl_params) {
+            for (const auto& params : cyl_params) {
                 const auto points = gen_circle(params);
 
                 for (const auto& p : points) {
-                    cylinders.emplace_back(p.x(), p.y(), p.z(), 0, 255, 0);
+                    circles.emplace_back(p.x(), p.y(), p.z(), 0, 255, 0);
                 }
             }
 
-            out_cloud += cylinders;
-            cyl_clouds.push_back(cylinders);
+            out += circles;
+            circle_clouds.push_back(circles);
         }
 
         prev_cyl_params = cyl_params;
     }
 
-    pcl::io::savePLYFile("./raw.ply", out_cloud);
-
-    return EXIT_SUCCESS;
+    pcl::io::savePLYFile("./raw.ply", out);
 }
