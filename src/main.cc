@@ -13,20 +13,41 @@
 #include <ranges>
 
 
-auto closest_to(const nova::Vec2f& point, const std::vector<nova::Vec2f>& points)
-        -> nova::Vec2f
-{
-    nova::Vec2f closest;
-    auto min_dist = std::numeric_limits<float>::max();
+std::pair<std::vector<nova::Vec4f>, std::vector<nova::Vec4f>> pairing(const std::vector<nova::Vec4f>& params_a, const std::vector<nova::Vec4f>& params_b, float threshold = 0.5f) {
+    std::vector<nova::Vec4f> ret_a;
+    std::vector<nova::Vec4f> ret_b;
+    std::vector<std::vector<float>> dist_mx;
 
-    for (const auto& p : points) {
-        if (const auto dist = (point - p).length(); dist < min_dist) {
-            min_dist = dist;
-            closest = p;
+    for (const auto& a : params_a) {
+        dist_mx.emplace_back(std::vector<float>{});
+        auto& vec = dist_mx.back();
+        const auto& c_a = nova::Vec2f{ a.x(), a.y() };
+
+        for (const auto& b : params_b) {
+            const auto& c_b = nova::Vec2f{ b.x(), b.y() };
+            vec.push_back((c_a - c_b).length());
         }
     }
 
-    return closest;
+    for (const auto& vec : dist_mx) {
+        for (const auto& elem : vec) {
+            std::cout << elem << ", ";
+        }
+        std::cout << std::endl;
+    }
+
+    for (const auto& [idx, vec] : std::views::enumerate(dist_mx)) {
+        const auto& min = std::ranges::min(vec);
+        const auto idx_b = std::distance(vec.begin(), std::ranges::find(vec, min));
+
+        if (min < threshold) {
+            ret_a.push_back(params_a[idx]);
+            ret_b.push_back(params_b[idx_b]);
+            logging::info("({}, {})\t({}, {})\tdist: {}", params_a[idx].x(), params_a[idx].y(), params_b[idx_b].x(), params_b[idx_b].y(), min);
+        }
+    }
+
+    return { ret_a, ret_b };
 }
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
@@ -105,20 +126,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
         }
 
         if (prev_cyl_params.size() > 0) {
-            std::vector<nova::Vec4f> curr_cyl_params;
-
-            for (const auto& elem : cyl_params) {
-                const auto prev_cyl_centers = prev_cyl_params
-                                            | std::views::transform([](const auto& elem) { return nova::Vec2f{ elem.x(), elem.y() }; })
-                                            | ranges::to<std::vector>();
-                const auto closest = closest_to({ elem.x(), elem.y() }, prev_cyl_centers);
-
-                constexpr auto Threshold = 0.5f;
-
-                if ((closest - nova::Vec2f{ elem.x(), elem.y() }).length() < Threshold) {
-                    curr_cyl_params.push_back(elem);
-                }
-            }
+            const auto [curr_cyl_params, new_prev_cyl_params] = pairing(cyl_params, prev_cyl_params);
 
             pcl::PointCloud<pcl::PointXYZRGB> circles;
 
@@ -130,18 +138,27 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
                 }
             }
 
+            pcl::PointCloud<pcl::PointXYZRGB> prev_circles;
+
+            for (const auto& params : new_prev_cyl_params) {
+                const auto points = gen_circle(params);
+
+                for (const auto& p : points) {
+                    prev_circles.emplace_back(p.x(), p.y(), p.z(), 0, 255, 0);
+                }
+            }
+
             out += circles;
 
-            const auto& prev_cloud = circle_clouds.back();
-            const auto min_size = std::min(std::size(prev_cloud), std::size(circles));
+            const auto min_size = std::min(std::size(prev_circles), std::size(circles));
 
             Eigen::MatrixXf A = Eigen::MatrixXf::Zero(3, static_cast<int>(min_size));
             Eigen::MatrixXf B = Eigen::MatrixXf::Zero(3, static_cast<int>(min_size));
 
             for (std::size_t i = 0; i < min_size; ++i) {
-                A(0, static_cast<int>(i)) = prev_cloud[i].x;
-                A(1, static_cast<int>(i)) = prev_cloud[i].y;
-                A(2, static_cast<int>(i)) = prev_cloud[i].z;
+                A(0, static_cast<int>(i)) = prev_circles[i].x;
+                A(1, static_cast<int>(i)) = prev_circles[i].y;
+                A(2, static_cast<int>(i)) = prev_circles[i].z;
 
                 B(0, static_cast<int>(i)) = circles[i].x;
                 B(1, static_cast<int>(i)) = circles[i].y;
@@ -164,7 +181,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
                 registered.emplace_back(ptt.x(), ptt.y(), ptt.z(), 255, 0, 0);
             }
 
-            for (const auto& p : prev_cloud) {
+            for (const auto& p : prev_circles) {
                 registered.emplace_back(p.x, p.y, p.z, 0, 255, 0);
             }
 
