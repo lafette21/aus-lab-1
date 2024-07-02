@@ -7,6 +7,12 @@
 #include "utils.hh"
 
 #include <nova/json.h>
+#include <rclcpp/rclcpp.hpp>
+#include <rclcpp/duration.hpp>
+#include <rosbag2_cpp/writer.hpp>
+#include <rosbag2_storage/storage_options.hpp>
+#include <rosidl_runtime_cpp/message_type_support_decl.hpp>
+#include <sensor_msgs/msg/point_cloud.hpp>
 
 using json = nova::json;
 
@@ -18,7 +24,21 @@ public:
         , m_objects(objects)
         , m_path(path)
         , m_lidar(m_config.at("lidar.vlp_16"))
-    {}
+    {
+        rosbag2_storage::StorageOptions storage_options;
+        storage_options.uri = "out.bag";
+        storage_options.storage_id = "sqlite3";
+
+        m_writer = std::make_unique<rosbag2_cpp::Writer>();
+
+        m_writer->open(storage_options);
+        m_writer->create_topic({
+            "/lidar",
+            "sensor_msgs/msg/PointCloud",
+            rmw_get_serialization_format(),
+            ""
+        });
+    }
 
     auto start() {
         setup();
@@ -99,17 +119,57 @@ public:
             return ret;
         }();
 
+        auto ts = rclcpp::Clock().now();
+
         for (const auto& [i, pose] : std::views::enumerate(sparse_poses)) {
             m_lidar.replace({ pose.position.x(), pose.position.y(), m_lidar.pos().z() });
             const auto data = m_lidar.scan(m_objects, pose.orientation.z())
                             | std::views::transform([pose](const auto& elem) { return nova::Vec3f{ elem.x() - pose.position.x(), elem.y() - pose.position.y(), elem.z() }; })
                             | ranges::to<std::vector>();
+
+
+            auto msg = std::make_shared<sensor_msgs::msg::PointCloud>();
+
+            msg->header.stamp = ts;
+            msg->header.frame_id = "cloud";
+
+            msg->points.resize(data.size());
+            msg->channels.resize(1);
+            msg->channels[0].name = "intensities";
+            msg->channels[0].values.resize(data.size());
+
+            for (std::size_t j = 0; j < data.size(); ++j) {
+                msg->points[j].x = data[j].x();
+                msg->points[j].y = data[j].y();
+                msg->points[j].z = data[j].z();
+                msg->channels[0].values[j] = 125;
+            }
+
+            // Serialize the message
+            auto serialized_msg = std::make_shared<rcutils_uint8_array_t>();
+            serialized_msg->buffer_capacity = 4096;  // Adjust the buffer size as necessary
+            serialized_msg->buffer_length = rosidl_runtime_cpp::get_serialized_size(msg.get());
+            serialized_msg->buffer = static_cast<uint8_t*>(malloc(serialized_msg->buffer_length));
+
+            if (!serialized_msg->buffer) {
+                std::cerr << "Failed to allocate memory for serialization" << std::endl;
+                return 1;
+            }
+
+            rosidl_runtime_cpp::serialize_message(pointcloud_msg.get(), serialized_msg.get());
+
+
+            m_writer->write(msg, "/lidar", msg->header.stamp);
+
+            ts += rclcpp::Duration(0, 250'000'000);
+
             print(fmt::format("./out/test_fn{}.xyz", i + 1), data);
         }
     }
 
 private:
     json m_config;
+    std::unique_ptr<rosbag2_cpp::Writer> m_writer;
     std::vector<primitive> m_objects;
     std::vector<nova::Vec3f> m_path;
     std::vector<float> m_curvature;
