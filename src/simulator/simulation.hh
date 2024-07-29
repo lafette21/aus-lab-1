@@ -7,12 +7,13 @@
 #include "utils.hh"
 
 #include <nova/json.h>
-#include <rclcpp/rclcpp.hpp>
 #include <rclcpp/duration.hpp>
+#include <rclcpp/rclcpp.hpp>
 #include <rosbag2_cpp/writer.hpp>
+#include <rosbag2_storage/ros_helper.hpp>
 #include <rosbag2_storage/storage_options.hpp>
-#include <rosidl_runtime_cpp/message_type_support_decl.hpp>
 #include <sensor_msgs/msg/point_cloud.hpp>
+
 
 using json = nova::json;
 
@@ -25,19 +26,18 @@ public:
         , m_path(path)
         , m_lidar(m_config.at("lidar.vlp_16"))
     {
+        m_writer = std::make_unique<rosbag2_cpp::Writer>();
+
         rosbag2_storage::StorageOptions storage_options;
         storage_options.uri = "out.bag";
         storage_options.storage_id = "sqlite3";
-
-        m_writer = std::make_unique<rosbag2_cpp::Writer>();
-
         m_writer->open(storage_options);
-        m_writer->create_topic({
-            "/lidar",
-            "sensor_msgs/msg/PointCloud",
-            rmw_get_serialization_format(),
-            ""
-        });
+
+        rosbag2_storage::TopicMetadata topic_metadata;
+        topic_metadata.name = "/lidar";
+        topic_metadata.type = "sensor_msgs/msg/PointCloud";
+        topic_metadata.serialization_format = "cdr";
+        m_writer->create_topic(topic_metadata);
     }
 
     auto start() {
@@ -146,20 +146,18 @@ public:
             }
 
             // Serialize the message
-            auto serialized_msg = std::make_shared<rcutils_uint8_array_t>();
-            serialized_msg->buffer_capacity = 4096;  // Adjust the buffer size as necessary
-            serialized_msg->buffer_length = rosidl_runtime_cpp::get_serialized_size(msg.get());
-            serialized_msg->buffer = static_cast<uint8_t*>(malloc(serialized_msg->buffer_length));
+            auto serialized_msg = std::make_shared<rclcpp::SerializedMessage>();
+            rclcpp::Serialization<sensor_msgs::msg::PointCloud> serializer;
+            serializer.serialize_message(msg.get(), serialized_msg.get());
 
-            if (!serialized_msg->buffer) {
-                std::cerr << "Failed to allocate memory for serialization" << std::endl;
-                return 1;
-            }
+            // Create a bag message
+            auto bag_message = std::make_shared<rosbag2_storage::SerializedBagMessage>();
+            bag_message->serialized_data = std::make_shared<rcutils_uint8_array_t>(serialized_msg->get_rcl_serialized_message());
+            bag_message->topic_name = "/lidar";
+            bag_message->time_stamp = msg->header.stamp.nanosec;
 
-            rosidl_runtime_cpp::serialize_message(pointcloud_msg.get(), serialized_msg.get());
-
-
-            m_writer->write(msg, "/lidar", msg->header.stamp);
+            // Write the message into the bag
+            m_writer->write(bag_message);
 
             ts += rclcpp::Duration(0, 250'000'000);
 
