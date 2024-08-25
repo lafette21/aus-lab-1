@@ -16,21 +16,21 @@ class lidar {
 public:
     lidar(const json& config)
         : m_config(config)
-    {
-        m_ang_res_h = m_config.lookup<float>("rpm.value") / 60 * 360 * m_config.lookup<float>("firing_cycle");
-        m_angles_hor = nova::linspace(nova::range{ 0.f, m_config.lookup<float>("fov_h") }, static_cast<std::size_t>(m_config.lookup<float>("fov_h") / m_ang_res_h), false);
-        m_angles_ver = nova::linspace(nova::range{ -m_config.lookup<float>("fov_v") / 2, m_config.lookup<float>("fov_v") / 2 }, m_config.lookup<std::size_t>("channels"), true);
-    }
+        , m_ang_res_h(m_config.lookup<float>("rpm.value") / 60 * 360 * m_config.lookup<float>("firing_cycle"))
+        , m_angles_hor(nova::linspace(nova::range{ 0.f, m_config.lookup<float>("fov_h") }, static_cast<std::size_t>(m_config.lookup<float>("fov_h") / m_ang_res_h), false))
+        , m_angles_ver(nova::linspace(nova::range{ -m_config.lookup<float>("fov_v") / 2, m_config.lookup<float>("fov_v") / 2 }, m_config.lookup<std::size_t>("channels"), true))
+    {}
 
-    auto string() {
+    auto string() const {
         return fmt::format("lidar(m_config={}, m_ang_res_h={})", m_config.dump(), m_ang_res_h);
     }
 
-    auto pos() {
+    auto pos() const {
         return m_origin;
     }
 
-    auto scan(const auto& objects, float orientation) {
+    // TODO(refact): Use radians everywhere
+    auto scan(const std::vector<primitive>& primitives, float orientation) const {
         std::vector<nova::Vec3f> result;
         result.reserve(m_angles_ver.size() * m_angles_hor.size());
 
@@ -59,23 +59,19 @@ public:
                     std::sin(angle_v)
                 };
 
-                result.push_back(closest_to(m_origin, ray_cast(ray{ m_origin, direction }, objects, sigma)));
+                result.push_back(closest_to(m_origin, ray_cast(ray{ m_origin, direction }, primitives, sigma)));
             }
         }
 
         const auto end = nova::now();
         const auto took = end - start;
-        logging::info("[LIDAR] rotation took: {}", took);
+        logging::debug("[LIDAR] rotation took: {}", took);
 
         return result;
     }
 
-    void replace(const nova::Vec3f& pos) {
+    void move(const nova::Vec3f& pos) {
         m_origin = pos;
-    }
-
-    void shift(const nova::Vec3f& t) {
-        m_origin += t;
     }
 
 private:
