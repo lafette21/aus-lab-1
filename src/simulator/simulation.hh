@@ -1,18 +1,24 @@
 #ifndef SIMULATION_HH
 #define SIMULATION_HH
 
+#if defined(ENABLE_ROS2BAG_OUTPUT) && ENABLE_ROS2BAG_OUTPUT == 1
+#define ROS2_BUILD
+#endif
+
 #include "lidar.hh"
 #include "logging.hh"
 #include "types.hh"
 #include "utils.hh"
 
 #include <nova/json.h>
+#ifdef ROS2_BUILD
 #include <rclcpp/duration.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rosbag2_cpp/writer.hpp>
 #include <rosbag2_storage/ros_helper.hpp>
 #include <rosbag2_storage/storage_options.hpp>
 #include <sensor_msgs/msg/point_cloud.hpp>
+#endif
 
 
 using json = nova::json;
@@ -26,6 +32,7 @@ public:
         , m_path(path)
         , m_lidar(m_config.at("lidar.vlp_16"))
     {
+#ifdef ROS2_BUILD
         m_writer = std::make_unique<rosbag2_cpp::Writer>();
 
         rosbag2_storage::StorageOptions storage_options;
@@ -38,6 +45,7 @@ public:
         topic_metadata.type = "sensor_msgs/msg/PointCloud";
         topic_metadata.serialization_format = "cdr";
         m_writer->create_topic(topic_metadata);
+#endif
     }
 
     auto start() {
@@ -119,7 +127,9 @@ public:
             return ret;
         }();
 
+#ifdef ROS2_BUILD
         auto ts = rclcpp::Clock().now();
+#endif
 
         for (const auto& [i, pose] : std::views::enumerate(sparse_poses)) {
             m_lidar.move({ pose.position.x(), pose.position.y(), m_lidar.pos().z() });
@@ -127,7 +137,7 @@ public:
                             | std::views::transform([pose](const auto& elem) { return nova::Vec3f{ elem.x() - pose.position.x(), elem.y() - pose.position.y(), elem.z() }; })
                             | ranges::to<std::vector>();
 
-
+#ifdef ROS2_BUILD
             auto msg = std::make_shared<sensor_msgs::msg::PointCloud>();
 
             msg->header.stamp = ts;
@@ -160,14 +170,16 @@ public:
             m_writer->write(bag_message);
 
             ts += rclcpp::Duration(0, 250'000'000);
-
+#endif
             print(fmt::format("./out/test_fn{}.xyz", i + 1), data);
         }
     }
 
 private:
     json m_config;
+#ifdef ROS2_BUILD
     std::unique_ptr<rosbag2_cpp::Writer> m_writer;
+#endif
     std::vector<primitive> m_objects;
     std::vector<nova::Vec3f> m_path;
     std::vector<float> m_curvature;
