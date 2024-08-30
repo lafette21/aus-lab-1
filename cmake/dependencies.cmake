@@ -1,3 +1,4 @@
+find_package(Boost COMPONENTS program_options REQUIRED)
 find_package(fmt REQUIRED)
 find_package(GSL REQUIRED)
 # find_package(PCL REQUIRED COMPONENTS common filters io segmentation)

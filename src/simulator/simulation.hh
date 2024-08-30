@@ -26,17 +26,18 @@ using json = nova::json;
 
 class simulation {
 public:
-    simulation(const json& config, const auto& objects, const auto& path)
+    simulation(const json& config, const auto& objects, const auto& path, const std::string& out_dir)
         : m_config(config)
         , m_objects(objects)
         , m_path(path)
         , m_lidar(m_config.at("lidar.vlp_16"))
+        , m_out_dir(out_dir)
     {
 #ifdef ROS2_BUILD
         m_writer = std::make_unique<rosbag2_cpp::Writer>();
 
         rosbag2_storage::StorageOptions storage_options;
-        storage_options.uri = "out.bag";
+        storage_options.uri = fmt::format("{}/out.bag", m_out_dir);
         storage_options.storage_id = "sqlite3";
         m_writer->open(storage_options);
 
@@ -171,7 +172,7 @@ public:
 
             ts += rclcpp::Duration(0, 250'000'000);
 #endif
-            print(fmt::format("./out/test_fn{}.xyz", i + 1), data);
+            print(fmt::format("{}/test_fn{}.xyz", m_out_dir, i + 1), data);
         }
     }
 
@@ -184,6 +185,7 @@ private:
     std::vector<nova::Vec3f> m_path;
     std::vector<float> m_curvature;
     lidar m_lidar;
+    std::string m_out_dir;
 
     void setup() {
         const auto _xs = m_path
