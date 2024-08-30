@@ -79,7 +79,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
         const auto objects = nova::read_file<map_parser>(std::filesystem::path((*args)["map"].as<std::string>()).string()).value();
         const auto path = nova::read_file<xyz_parser>(std::filesystem::path((*args)["path"].as<std::string>()).string()).value();
 
-        simulation simulation(config, objects, path, out_dir);
+        simulation simulation(config, objects, path, out_dir, (*args)["format"].as<std::string>());
 
         simulation.start();
 

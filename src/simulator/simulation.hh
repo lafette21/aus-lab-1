@@ -1,7 +1,7 @@
 #ifndef SIMULATION_HH
 #define SIMULATION_HH
 
-#if defined(ENABLE_ROS2BAG_OUTPUT) && ENABLE_ROS2BAG_OUTPUT == 1
+#if defined(ENABLE_ROSBAG2_OUTPUT) && ENABLE_ROSBAG2_OUTPUT == 1
 #define ROS2_BUILD
 #endif
 
@@ -26,12 +26,13 @@ using json = nova::json;
 
 class simulation {
 public:
-    simulation(const json& config, const auto& objects, const auto& path, const std::string& out_dir)
+    simulation(const json& config, const auto& objects, const auto& path, const std::string& out_dir, const std::string& format)
         : m_config(config)
         , m_objects(objects)
         , m_path(path)
         , m_lidar(m_config.at("lidar.vlp_16"))
         , m_out_dir(out_dir)
+        , m_format(format)
     {
 #ifdef ROS2_BUILD
         m_writer = std::make_unique<rosbag2_cpp::Writer>();
@@ -139,40 +140,44 @@ public:
                             | ranges::to<std::vector>();
 
 #ifdef ROS2_BUILD
-            auto msg = std::make_shared<sensor_msgs::msg::PointCloud>();
+            if (m_format == "rosbag") {
+                auto msg = std::make_shared<sensor_msgs::msg::PointCloud>();
 
-            msg->header.stamp = ts;
-            msg->header.frame_id = "cloud";
+                msg->header.stamp = ts;
+                msg->header.frame_id = "cloud";
 
-            msg->points.resize(data.size());
-            msg->channels.resize(1);
-            msg->channels[0].name = "intensities";
-            msg->channels[0].values.resize(data.size());
+                msg->points.resize(data.size());
+                msg->channels.resize(1);
+                msg->channels[0].name = "intensities";
+                msg->channels[0].values.resize(data.size());
 
-            for (std::size_t j = 0; j < data.size(); ++j) {
-                msg->points[j].x = data[j].x();
-                msg->points[j].y = data[j].y();
-                msg->points[j].z = data[j].z();
-                msg->channels[0].values[j] = 125;
+                for (std::size_t j = 0; j < data.size(); ++j) {
+                    msg->points[j].x = data[j].x();
+                    msg->points[j].y = data[j].y();
+                    msg->points[j].z = data[j].z();
+                    msg->channels[0].values[j] = 125;
+                }
+
+                // Serialize the message
+                auto serialized_msg = std::make_shared<rclcpp::SerializedMessage>();
+                rclcpp::Serialization<sensor_msgs::msg::PointCloud> serializer;
+                serializer.serialize_message(msg.get(), serialized_msg.get());
+
+                // Create a bag message
+                auto bag_message = std::make_shared<rosbag2_storage::SerializedBagMessage>();
+                bag_message->serialized_data = std::make_shared<rcutils_uint8_array_t>(serialized_msg->get_rcl_serialized_message());
+                bag_message->topic_name = "/lidar";
+                bag_message->time_stamp = msg->header.stamp.nanosec;
+
+                // Write the message into the bag
+                m_writer->write(bag_message);
+
+                ts += rclcpp::Duration(0, 250'000'000);
             }
-
-            // Serialize the message
-            auto serialized_msg = std::make_shared<rclcpp::SerializedMessage>();
-            rclcpp::Serialization<sensor_msgs::msg::PointCloud> serializer;
-            serializer.serialize_message(msg.get(), serialized_msg.get());
-
-            // Create a bag message
-            auto bag_message = std::make_shared<rosbag2_storage::SerializedBagMessage>();
-            bag_message->serialized_data = std::make_shared<rcutils_uint8_array_t>(serialized_msg->get_rcl_serialized_message());
-            bag_message->topic_name = "/lidar";
-            bag_message->time_stamp = msg->header.stamp.nanosec;
-
-            // Write the message into the bag
-            m_writer->write(bag_message);
-
-            ts += rclcpp::Duration(0, 250'000'000);
 #endif
-            print(fmt::format("{}/test_fn{}.xyz", m_out_dir, i + 1), data);
+            if (m_format == "xyz") {
+                print(fmt::format("{}/test_fn{}.xyz", m_out_dir, i + 1), data);
+            }
         }
     }
 
@@ -186,6 +191,7 @@ private:
     std::vector<float> m_curvature;
     lidar m_lidar;
     std::string m_out_dir;
+    std::string m_format;
 
     void setup() {
         const auto _xs = m_path
