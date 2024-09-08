@@ -20,6 +20,8 @@
 #include <sensor_msgs/msg/point_cloud.hpp>
 #endif
 
+#include <chrono>
+
 
 using json = nova::json;
 
@@ -160,16 +162,10 @@ public:
             rclcpp::Serialization<sensor_msgs::msg::PointCloud> serializer;
             serializer.serialize_message(msg.get(), serialized_msg.get());
 
-            // Create a bag message
-            auto bag_message = std::make_shared<rosbag2_storage::SerializedBagMessage>();
-            bag_message->serialized_data = std::make_shared<rcutils_uint8_array_t>(serialized_msg->get_rcl_serialized_message());
-            bag_message->topic_name = "/lidar";
-            bag_message->time_stamp = msg->header.stamp.nanosec;
-
             // Write the message into the bag
-            m_writer->write(bag_message);
+            m_writer->write(serialized_msg, "/lidar", "sensor_msgs/msgs/point_cloud", ts);
 
-            ts += rclcpp::Duration(0, 250'000'000);
+            ts += rclcpp::Duration(std::chrono::milliseconds{ 250 });
 #endif
             print(fmt::format("./out/test_fn{}.xyz", i + 1), data);
         }
