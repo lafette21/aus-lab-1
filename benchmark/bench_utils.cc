@@ -9,13 +9,6 @@
 #include <vector>
 
 
-// static void BM_StringCreation(benchmark::State& state) {
-  // for (auto _ : state)
-    // std::string empty_string;
-// }
-
-// BENCHMARK(BM_StringCreation);
-
 static void bench_downsample_sim(benchmark::State& state) {
     const auto cloud = nova::read_file<lidar_data_parser>("./benchmark/sim.xyz").value();
 
