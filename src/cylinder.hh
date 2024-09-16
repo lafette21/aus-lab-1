@@ -115,7 +115,8 @@
 
         const auto min_sample = std::vector<nova::Vec3f> { p1, p2, p3 };
         const auto sample_cylinder = estimate_cylinder_min(min_sample);
-        const auto sample_result = calculate_RANSAC_diffs(points, sample_cylinder, threshold);
+        // const auto sample_result = calculate_RANSAC_diffs(points, sample_cylinder, threshold);
+        const auto sample_result = calculate_RANSAC_diffs_cuda(points.data(), points.size(), sample_cylinder, threshold);
 
         if (sample_result.num_inliers > best_sample_inlier_num
             && sample_result.num_inliers > 80 // TODO: Magic number
@@ -129,7 +130,8 @@
     }
 
     // Finally, the cylinder is refitted from the best consensus set
-    const auto best_result = calculate_RANSAC_diffs(points, best_cylinder, threshold);
+    // const auto best_result = calculate_RANSAC_diffs(points, best_cylinder, threshold);
+    const auto best_result = calculate_RANSAC_diffs_cuda(points.data(), points.size(), best_cylinder, threshold);
 
     std::vector<nova::Vec3f> inliers;
 

@@ -4,7 +4,7 @@ project(aus-lab-1
     VERSION 0.0.1
     DESCRIPTION ""
     HOMEPAGE_URL ""
-    LANGUAGES CXX C
+    LANGUAGES CXX C CUDA
 )
 
 include(cmake/compiler-warnings.cmake)

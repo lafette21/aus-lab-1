@@ -45,4 +45,19 @@ struct RANSAC_diffs {
     };
 }
 
+struct RANSAC_diffs_cuda {
+    std::size_t num_inliers;
+    std::vector<float> distances;
+    std::vector<char> is_inliers;
+};
+
+// Declaration of the CUDA wrapper function
+auto calculate_RANSAC_diffs_cuda(
+    const nova::Vec3f* points,
+    std::size_t points_size,
+    const nova::Vec4f& cylinder,
+    float threshold
+)
+        -> RANSAC_diffs_cuda;
+
 #endif // RANSAC_HH
