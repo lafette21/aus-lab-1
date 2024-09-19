@@ -1,19 +1,3 @@
-add_executable(poc
-    poc.cc
-)
-
-target_include_directories(poc PUBLIC
-    ${PCL_INCLUDE_DIRS}
-)
-
-target_link_libraries(poc PUBLIC
-    fmt::fmt-header-only
-    nova
-    ${PCL_LIBRARIES}
-)
-
-code_analysis(poc PRIVATE)
-
 set(EXEC_NAME ph)
 
 add_executable(${EXEC_NAME}
