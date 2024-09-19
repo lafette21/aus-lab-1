@@ -7,6 +7,14 @@ project(aus-lab-1
     LANGUAGES CXX C
 )
 
+option(ENABLE_ROS2BAG_OUTPUT "Enable output into ROS2 bag format" OFF)
+
+if(ENABLE_ROS2BAG_OUTPUT)
+    add_definitions(-DENABLE_ROS2BAG_OUTPUT=1)
+else()
+    add_definitions(-DENABLE_ROS2BAG_OUTPUT=0)
+endif()
+
 include(cmake/compiler-warnings.cmake)
 include(cmake/dependencies.cmake)
 include(cmake/settings.cmake)
