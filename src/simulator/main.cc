@@ -22,7 +22,7 @@ void validate_format(const std::string& format) {
     const auto valid_formats = std::vector<std::string>{ "xyz" };
 #endif
 
-    if (std::find(valid_formats.begin(), valid_formats.end(), format) == valid_formats.end()) {
+    if (not std::ranges::contains(valid_formats, format)) {
         throw po::validation_error(po::validation_error::invalid_option_value, "format", format);
     }
 }
@@ -34,9 +34,9 @@ auto parse_args(int argc, char* argv[]) -> std::optional<po::variables_map> {
         ("map,m", po::value<std::string>()->required()->value_name("FILE"), "Map file")
         ("path,p", po::value<std::string>()->required()->value_name("FILE"), "Path file")
 #ifdef ROS2_BUILD
-        ("format,f", po::value<std::string>()->required()->value_name("xyz|rosbag2")->notifier(validate_format)->default_value("xyz"), "Output format")
+        ("format,f", po::value<std::string>()->value_name("xyz|rosbag2")->notifier(validate_format)->default_value("xyz"), "Output format")
 #else
-        ("format,f", po::value<std::string>()->required()->value_name("xyz")->notifier(validate_format)->default_value("xyz"), "Output format")
+        ("format,f", po::value<std::string>()->value_name("xyz")->notifier(validate_format)->default_value("xyz"), "Output format")
 #endif
         ("outdir,o", po::value<std::string>()->required()->value_name("DIR")->default_value("out"), "Output directory")
         ("help,h", "Show this help");
