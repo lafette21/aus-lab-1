@@ -280,7 +280,7 @@ struct fmt::formatter<nova::Vec3f> {
     }
 
     template <typename ParseContext>
-    auto format(const nova::Vec3f& obj, ParseContext& ctx) {
+    auto format(const nova::Vec3f& obj, ParseContext& ctx) const {
         return fmt::format_to(ctx.out(), "{{ {}, {}, {} }}", obj.x(), obj.y(), obj.z());
     }
 };
