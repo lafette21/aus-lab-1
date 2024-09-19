@@ -4,6 +4,7 @@
 #include <nova/vec.h>
 #include <fmt/format.h>
 
+#include <fstream>
 #include <sstream>
 #include <string>
 #include <variant>
