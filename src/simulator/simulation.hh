@@ -1,7 +1,7 @@
 #ifndef SIMULATION_HH
 #define SIMULATION_HH
 
-#if defined(ENABLE_ROS2BAG_OUTPUT) && ENABLE_ROS2BAG_OUTPUT == 1
+#if defined(ENABLE_ROSBAG2_OUTPUT) && ENABLE_ROSBAG2_OUTPUT == 1
 #define ROS2_BUILD
 #endif
 
@@ -28,17 +28,19 @@ using json = nova::json;
 
 class simulation {
 public:
-    simulation(const json& config, const auto& objects, const auto& path)
+    simulation(const json& config, const auto& objects, const auto& path, const std::string& out_dir, const std::string& format)
         : m_config(config)
         , m_objects(objects)
         , m_path(path)
         , m_lidar(m_config.at("lidar.vlp_16"))
+        , m_out_dir(out_dir)
+        , m_format(format)
     {
 #ifdef ROS2_BUILD
         m_writer = std::make_unique<rosbag2_cpp::Writer>();
 
         rosbag2_storage::StorageOptions storage_options;
-        storage_options.uri = "out.bag";
+        storage_options.uri = fmt::format("{}/out.bag", m_out_dir);
         storage_options.storage_id = "sqlite3";
         m_writer->open(storage_options);
 
@@ -140,34 +142,38 @@ public:
                             | ranges::to<std::vector>();
 
 #ifdef ROS2_BUILD
-            auto msg = std::make_shared<sensor_msgs::msg::PointCloud>();
+            if (m_format == "rosbag") {
+                auto msg = std::make_shared<sensor_msgs::msg::PointCloud>();
 
-            msg->header.stamp = ts;
-            msg->header.frame_id = "cloud";
+                msg->header.stamp = ts;
+                msg->header.frame_id = "cloud";
 
-            msg->points.resize(data.size());
-            msg->channels.resize(1);
-            msg->channels[0].name = "intensities";
-            msg->channels[0].values.resize(data.size());
+                msg->points.resize(data.size());
+                msg->channels.resize(1);
+                msg->channels[0].name = "intensities";
+                msg->channels[0].values.resize(data.size());
 
-            for (std::size_t j = 0; j < data.size(); ++j) {
-                msg->points[j].x = data[j].x();
-                msg->points[j].y = data[j].y();
-                msg->points[j].z = data[j].z();
-                msg->channels[0].values[j] = 125;
+                for (std::size_t j = 0; j < data.size(); ++j) {
+                    msg->points[j].x = data[j].x();
+                    msg->points[j].y = data[j].y();
+                    msg->points[j].z = data[j].z();
+                    msg->channels[0].values[j] = 125;
+                }
+
+                // Serialize the message
+                auto serialized_msg = std::make_shared<rclcpp::SerializedMessage>();
+                rclcpp::Serialization<sensor_msgs::msg::PointCloud> serializer;
+                serializer.serialize_message(msg.get(), serialized_msg.get());
+
+                // Write the message into the bag
+                m_writer->write(serialized_msg, "/lidar", "sensor_msgs/msgs/point_cloud", ts);
+
+                ts += rclcpp::Duration(std::chrono::milliseconds{ 250 });
             }
-
-            // Serialize the message
-            auto serialized_msg = std::make_shared<rclcpp::SerializedMessage>();
-            rclcpp::Serialization<sensor_msgs::msg::PointCloud> serializer;
-            serializer.serialize_message(msg.get(), serialized_msg.get());
-
-            // Write the message into the bag
-            m_writer->write(serialized_msg, "/lidar", "sensor_msgs/msgs/point_cloud", ts);
-
-            ts += rclcpp::Duration(std::chrono::milliseconds{ 250 });
 #endif
-            print(fmt::format("./out/test_fn{}.xyz", i + 1), data);
+            if (m_format == "xyz") {
+                print(fmt::format("{}/test_fn{}.xyz", m_out_dir, i + 1), data);
+            }
         }
     }
 
@@ -180,6 +186,8 @@ private:
     std::vector<nova::Vec3f> m_path;
     std::vector<float> m_curvature;
     lidar m_lidar;
+    std::string m_out_dir;
+    std::string m_format;
 
     void setup() {
         const auto _xs = m_path
