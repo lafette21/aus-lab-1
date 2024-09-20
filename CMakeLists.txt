@@ -24,6 +24,7 @@ set_project_warnings(project_warnings)
 
 enable_testing()
 
+add_subdirectory(benchmark)
 add_subdirectory(deps)
 add_subdirectory(src)
 add_subdirectory(unit-tests)
