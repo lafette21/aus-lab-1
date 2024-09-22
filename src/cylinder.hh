@@ -1,6 +1,7 @@
 #ifndef CYLINDER_HH
 #define CYLINDER_HH
 
+#include "logging.hh"
 #include "ransac.hh"
 
 #include <Eigen/Core>
@@ -8,7 +9,6 @@
 #include <nova/vec.h>
 #include <nova/random.h>
 #include <nova/types.h>
-#include <spdlog/spdlog.h>
 
 #include <cmath>
 #include <ranges>
@@ -104,7 +104,7 @@
     std::size_t best_sample_inlier_num = 0;
     nova::Vec4f best_cylinder;
 
-    spdlog::info("RANDOM ENGINE SEED: {}", nova::random().seed());
+    logging::debug("RANDOM ENGINE SEED: {}", nova::random().seed());
 
     for (std::size_t i = 0; i < iter; ++i) {
         const auto p1 = nova::random().choice(points);
@@ -124,7 +124,7 @@
         ) {
             best_sample_inlier_num = sample_result.num_inliers;
             best_cylinder = sample_cylinder;
-            spdlog::info("Inlier num. update: {}\t\tradius: {} m", best_sample_inlier_num, best_cylinder.w());
+            logging::debug("Inlier num. update: {}\t\tradius: {} m", best_sample_inlier_num, best_cylinder.w());
         }
     }
 

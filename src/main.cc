@@ -3,10 +3,12 @@
 #include "utils.hh"
 #include "types.hh"
 
+#include <fmt/chrono.h>
 #include <fmt/format.h>
 #include <nova/io.h>
 #include <spdlog/spdlog.h>
 
+#include <chrono>
 #include <filesystem>
 #include <future>
 #include <numbers>
@@ -29,12 +31,12 @@ std::pair<std::vector<nova::Vec4f>, std::vector<nova::Vec4f>> pairing(const std:
         }
     }
 
-    for (const auto& vec : dist_mx) {
-        for (const auto& elem : vec) {
-            std::cout << elem << ", ";
-        }
-        std::cout << std::endl;
-    }
+    // for (const auto& vec : dist_mx) {
+        // for (const auto& elem : vec) {
+            // std::cout << elem << ", ";
+        // }
+        // std::cout << std::endl;
+    // }
 
     for (const auto& [idx, vec] : std::views::enumerate(dist_mx)) {
         const auto& min = std::ranges::min(vec);
@@ -43,7 +45,7 @@ std::pair<std::vector<nova::Vec4f>, std::vector<nova::Vec4f>> pairing(const std:
         if (min < threshold) {
             ret_a.push_back(params_a[idx]);
             ret_b.push_back(params_b[idx_b]);
-            logging::info("({}, {})\t({}, {})\tdist: {}", params_a[idx].x(), params_a[idx].y(), params_b[idx_b].x(), params_b[idx_b].y(), min);
+            logging::debug("({}, {})\t({}, {})\tdist: {}", params_a[idx].x(), params_a[idx].y(), params_b[idx_b].x(), params_b[idx_b].y(), min);
         }
     }
 
@@ -83,7 +85,9 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
     Eigen::Matrix4f trafo = Eigen::Matrix4f::Identity();
 
     for (const auto& [idx, cloud] : std::views::enumerate(clouds)) {
-        logging::info("Cloud size: {}", cloud.size());
+        logging::debug("Cloud size: {}", cloud.size());
+
+        const auto start = nova::now();
 
         const auto downsampled = downsample(cloud);
         const auto filtered = filter_planes(downsampled);
@@ -92,15 +96,15 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
         logging::info("Clusters found: {}", clusters.size());
 
         for (const auto& cl : clusters) {
-            logging::info("Cluster size: {}", cl.indices.size());
+            logging::debug("Cluster size: {}", cl.indices.size());
         }
 
         const auto point_clouds = extract_clusters(filtered, clusters);
 
-        logging::info("Point clouds extracted: {}", point_clouds.size());
+        logging::debug("Point clouds extracted: {}", point_clouds.size());
 
         for (const auto& elem : point_clouds) {
-            logging::info("Cloud size: {}", elem.size());
+            logging::debug("Cloud size: {}", elem.size());
         }
 
         std::vector<std::future<std::tuple<nova::Vec4f, pcl::PointCloud<pcl::PointXYZRGB>, std::vector<nova::Vec3f>>>> futures;
@@ -121,9 +125,9 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
             cyl_params.push_back(params);
         }
 
-        for (const auto& p : cyl_params) {
-            fmt::print("{} {}\n", p.x(), p.y());
-        }
+        // for (const auto& p : cyl_params) {
+            // fmt::print("{} {}\n", p.x(), p.y());
+        // }
 
         if (prev_cyl_params.size() > 0) {
             const auto [curr_cyl_params, new_prev_cyl_params] = pairing(cyl_params, prev_cyl_params);
@@ -204,6 +208,8 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
         }
 
         prev_cyl_params = cyl_params;
+
+        logging::info("Processing took: {}", std::chrono::duration_cast<std::chrono::milliseconds>(nova::now() - start));
     }
 
     pcl::io::savePLYFile("./raw.ply", out);
