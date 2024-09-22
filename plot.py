@@ -9,8 +9,11 @@ matplotlib.use('tkAgg')
 
 def plot_coordinates(file_path):
     # Read the file
-    with open(file_path, 'r') as file:
-        lines = file.readlines()
+    try:
+        with open(file_path, 'r') as file:
+            lines = file.readlines()
+    except Exception as ex:
+        return
 
     # Extract coordinates
     x = []
@@ -34,7 +37,13 @@ def plot_coordinates(file_path):
 
     # Create the scatter plot using x, y coordinates and corresponding colors
     plt.scatter(x, y, c=colors, marker='o')
-    plt.show()
+    #  plt.show()
 
-file_path = 'raw.ply'
-plot_coordinates(file_path)
+#  file_path = 'registered-4.ply'
+#  plot_coordinates(file_path)
+
+for i in range(1, 300):
+    file_path = f'registered-{i}.ply'
+    plot_coordinates(file_path)
+
+plt.show()

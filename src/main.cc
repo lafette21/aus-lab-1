@@ -15,15 +15,6 @@
 #include <ranges>
 
 
-auto calc_trafo_2d(const nova::Vec2f& prev, const nova::Vec2f& curr)
-        -> std::pair<nova::Vec2f, float>
-{
-    const auto diff = curr - prev;
-    const auto angle = std::atan2(diff.x(), diff.y());
-
-    return { diff, angle };
-}
-
 std::pair<std::vector<nova::Vec4f>, std::vector<nova::Vec4f>> pairing(const std::vector<nova::Vec4f>& params_a, const std::vector<nova::Vec4f>& params_b, float threshold = 0.5f) {
     std::vector<nova::Vec4f> ret_a;
     std::vector<nova::Vec4f> ret_b;
@@ -89,9 +80,8 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
     logging::info("Processing cloud(s)");
 
     pcl::PointCloud<pcl::PointXYZRGB> out;
-    // std::vector<pcl::PointCloud<pcl::PointXYZRGB>> circle_clouds;
     std::vector<nova::Vec4f> prev_cyl_params;
-    Eigen::Matrix4f trafo = Eigen::Matrix4f::Identity();
+    Eigen::Matrix3f trafo = Eigen::Matrix3f::Identity();
 
     for (const auto& [idx, cloud] : std::views::enumerate(clouds)) {
         logging::debug("Cloud size: {}", cloud.size());
@@ -141,70 +131,9 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
         if (prev_cyl_params.size() > 0) {
             const auto [curr_cyl_params, new_prev_cyl_params] = pairing(cyl_params, prev_cyl_params);
 
-            // pcl::PointCloud<pcl::PointXYZRGB> circles;
-
-            // for (const auto& params : curr_cyl_params) {
-                // const auto points = gen_circle(params);
-
-                // for (const auto& p : points) {
-                    // circles.emplace_back(p.x(), p.y(), p.z(), 0, 255, 0);
-                // }
-            // }
-
-            // pcl::PointCloud<pcl::PointXYZRGB> prev_circles;
-
-            // for (const auto& params : new_prev_cyl_params) {
-                // const auto points = gen_circle(params);
-
-                // for (const auto& p : points) {
-                    // prev_circles.emplace_back(p.x(), p.y(), p.z(), 0, 255, 0);
-                // }
-            // }
-
-            // out += circles;
-
-            // const auto min_size = std::min(std::size(prev_circles), std::size(circles));
-
-            // Eigen::MatrixXf A = Eigen::MatrixXf::Zero(3, static_cast<int>(min_size));
-            // Eigen::MatrixXf B = Eigen::MatrixXf::Zero(3, static_cast<int>(min_size));
-
-            // for (std::size_t i = 0; i < min_size; ++i) {
-                // A(0, static_cast<int>(i)) = prev_circles[i].x;
-                // A(1, static_cast<int>(i)) = prev_circles[i].y;
-                // A(2, static_cast<int>(i)) = prev_circles[i].z;
-
-                // B(0, static_cast<int>(i)) = circles[i].x;
-                // B(1, static_cast<int>(i)) = circles[i].y;
-                // B(2, static_cast<int>(i)) = circles[i].z;
-            // }
-
-            // const auto new_trafo_tmp = rigid_transform_3D(B, A);
-
-            // Eigen::Matrix4f new_trafo = Eigen::Matrix4f::Identity();
-            // new_trafo.block<3, 3>(0, 0) = new_trafo_tmp.R;
-            // new_trafo.block<3, 1>(0, 3) = new_trafo_tmp.t;
-
-            // trafo = trafo * new_trafo;
-
-            // pcl::PointCloud<pcl::PointXYZRGB> registered;
-
-            // for (const auto& p : circles) {
-                // const Eigen::Vector4f pt = Eigen::Vector4f{ p.x, p.y, p.z, 1.0f };
-                // const Eigen::Vector4f ptt = trafo * pt;
-                // registered.emplace_back(ptt.x(), ptt.y(), ptt.z(), 255, 0, 0);
-            // }
-
-            // for (const auto& p : prev_circles) {
-                // registered.emplace_back(p.x, p.y, p.z, 0, 255, 0);
-            // }
-
-            // pcl::io::savePLYFile(fmt::format("./registered-{}.ply", idx), registered);
-
-            // circle_clouds.push_back(circles);
-
             pcl::PointCloud<pcl::PointXYZRGB> prev_points;
 
-            for (const auto& params : curr_cyl_params) {
+            for (const auto& params : new_prev_cyl_params) {
                 prev_points.emplace_back(params.x(), params.y(), 0, 0, 255, 0);
             }
 
@@ -216,11 +145,40 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
 
             out += curr_points;
 
-            for (std::size_t i = 0; i < curr_cyl_params.size(); ++i) {
-                const auto [diff, angle] = calc_trafo_2d({ new_prev_cyl_params[i].x(), new_prev_cyl_params[i].y() }, { curr_cyl_params[i].x(), curr_cyl_params[i].y() });
-                logging::info("{}, {}, {}", diff.x(), diff.y(), angle);
+            const auto min_size = std::min(std::size(prev_points), std::size(curr_points));
+
+            Eigen::MatrixXf A = Eigen::MatrixXf::Zero(2, static_cast<int>(min_size));
+            Eigen::MatrixXf B = Eigen::MatrixXf::Zero(2, static_cast<int>(min_size));
+
+            for (std::size_t i = 0; i < min_size; ++i) {
+                A(0, static_cast<int>(i)) = prev_points[i].x;
+                A(1, static_cast<int>(i)) = prev_points[i].y;
+
+                B(0, static_cast<int>(i)) = curr_points[i].x;
+                B(1, static_cast<int>(i)) = curr_points[i].y;
             }
 
+            const auto new_trafo_tmp = rigid_transform_2D(B, A);
+
+            Eigen::Matrix3f new_trafo = Eigen::Matrix3f::Identity();
+            new_trafo.block<2, 2>(0, 0) = new_trafo_tmp.R;
+            new_trafo.block<2, 1>(0, 2) = new_trafo_tmp.t;
+
+            trafo = trafo * new_trafo;
+
+            pcl::PointCloud<pcl::PointXYZRGB> registered;
+
+            for (const auto& p : curr_points) {
+                const Eigen::Vector3f pt = Eigen::Vector3f{ p.x, p.y, 1.0f };
+                const Eigen::Vector3f ptt = trafo * pt;
+                registered.emplace_back(ptt.x(), ptt.y(), 0, 255, 0, 0);
+            }
+
+            for (const auto& p : prev_points) {
+                registered.emplace_back(p.x, p.y, 0, 0, 255, 0);
+            }
+
+            pcl::io::savePLYFile(fmt::format("./registered-{}.ply", idx), registered);
         } else {
             pcl::PointCloud<pcl::PointXYZRGB> points;
 
