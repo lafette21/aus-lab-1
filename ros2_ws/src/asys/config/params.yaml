@@ -1,0 +1,6 @@
+perception:
+  ros__parameters:
+    # inputTopic: /lidar
+    inputTopic: /velodyne_points
+    outputTopic: /cylinders
+    qos: 10
