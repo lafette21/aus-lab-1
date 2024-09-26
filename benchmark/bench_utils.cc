@@ -13,7 +13,7 @@ static void bench_downsample_sim(benchmark::State& state) {
     const auto cloud = nova::read_file<lidar_data_parser>("./benchmark/sim.xyz").value();
 
     for (auto _ : state) {
-        const auto _ = downsample(cloud);
+        const auto tmp = downsample(cloud);
     }
 }
 
@@ -21,7 +21,7 @@ static void bench_downsample_real(benchmark::State& state) {
     const auto cloud = nova::read_file<lidar_data_parser>("./benchmark/real.xyz").value();
 
     for (auto _ : state) {
-        const auto _ = downsample(cloud);
+        const auto tmp = downsample(cloud);
     }
 }
 
@@ -29,7 +29,7 @@ static void bench_filter_planes_downsampled_sim(benchmark::State& state) {
     const auto cloud = downsample(nova::read_file<lidar_data_parser>("./benchmark/sim.xyz").value());
 
     for (auto _ : state) {
-        const auto _ = filter_planes(cloud);
+        const auto tmp = filter_planes(cloud);
     }
 }
 
@@ -37,7 +37,7 @@ static void bench_filter_planes_downsampled_real(benchmark::State& state) {
     const auto cloud = downsample(nova::read_file<lidar_data_parser>("./benchmark/real.xyz").value());
 
     for (auto _ : state) {
-        const auto _ = filter_planes(cloud);
+        const auto tmp = filter_planes(cloud);
     }
 }
 
@@ -45,7 +45,7 @@ static void bench_cluster_filtered_downsampled_sim(benchmark::State& state) {
     const auto cloud = filter_planes(downsample(nova::read_file<lidar_data_parser>("./benchmark/sim.xyz").value()));
 
     for (auto _ : state) {
-        const auto _ = cluster(cloud);
+        const auto tmp = cluster(cloud);
     }
 }
 
@@ -53,7 +53,7 @@ static void bench_cluster_filtered_downsampled_real(benchmark::State& state) {
     const auto cloud = filter_planes(downsample(nova::read_file<lidar_data_parser>("./benchmark/real.xyz").value()));
 
     for (auto _ : state) {
-        const auto _ = cluster(cloud);
+        const auto tmp = cluster(cloud);
     }
 }
 
@@ -62,7 +62,7 @@ static void bench_extract_clusters_filtered_downsampled_sim(benchmark::State& st
     const auto clusters = cluster(cloud);
 
     for (auto _ : state) {
-        const auto _ = extract_clusters(cloud, clusters);
+        const auto tmp = extract_clusters(cloud, clusters);
     }
 }
 
@@ -71,7 +71,7 @@ static void bench_extract_clusters_filtered_downsampled_real(benchmark::State& s
     const auto clusters = cluster(cloud);
 
     for (auto _ : state) {
-        const auto _ = extract_clusters(cloud, clusters);
+        const auto tmp = extract_clusters(cloud, clusters);
     }
 }
 
@@ -81,7 +81,7 @@ static void bench_extract_1_cylinder_sim(benchmark::State& state) {
     const auto point_clouds = extract_clusters(cloud, clusters);
 
     for (auto _ : state) {
-        const auto _ = extract_cylinder(point_clouds[0]);
+        const auto tmp = extract_cylinder(point_clouds[0]);
     }
 }
 
@@ -91,7 +91,7 @@ static void bench_extract_1_cylinder_real(benchmark::State& state) {
     const auto point_clouds = extract_clusters(cloud, clusters);
 
     for (auto _ : state) {
-        const auto _ = extract_cylinder(point_clouds[0]);
+        const auto tmp = extract_cylinder(point_clouds[0]);
     }
 }
 
@@ -108,7 +108,7 @@ static void bench_extract_cylinders_par_sim(benchmark::State& state) {
         }
 
         for (auto& f : futures) {
-            const auto _ = f.get();
+            const auto tmp = f.get();
         }
     }
 }
@@ -126,7 +126,7 @@ static void bench_extract_cylinders_par_real(benchmark::State& state) {
         }
 
         for (auto& f : futures) {
-            const auto _ = f.get();
+            const auto tmp = f.get();
         }
     }
 }
