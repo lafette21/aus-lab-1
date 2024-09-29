@@ -164,6 +164,53 @@
     return ret;
 }
 
+[[nodiscard]] inline auto rigid_transform_2D(const Eigen::MatrixXf& A, const Eigen::MatrixXf& B)
+        -> trafo_2d
+{
+    assert(A.rows() == B.rows() and A.cols() == B.cols());
+
+    if (A.rows() != 2) {
+        throw std::runtime_error("Matrix A is not 2xN!");
+    }
+
+    if (B.rows() != 2) {
+        throw std::runtime_error("Matrix B is not 2xN!");
+    }
+
+    trafo_2d ret;
+
+    // Compute centroids of A and B
+    const Eigen::Vector2f centroid_A = A.rowwise().mean();
+    const Eigen::Vector2f centroid_B = B.rowwise().mean();
+
+    // Subtract centroids to center the points
+    const Eigen::MatrixXf Am = A.colwise() - centroid_A;
+    const Eigen::MatrixXf Bm = B.colwise() - centroid_B;
+
+    // Compute the covariance matrix
+    const Eigen::Matrix2f H = Am * Bm.transpose();
+
+    // Perform SVD on the covariance matrix H
+    Eigen::JacobiSVD<Eigen::Matrix2f> svd(H, Eigen::ComputeFullU | Eigen::ComputeFullV);
+
+    // Calculate the rotation matrix
+    const Eigen::Matrix2f Ut = svd.matrixU().transpose();
+    Eigen::Matrix2f V = svd.matrixV();
+
+    ret.R = V * Ut;
+
+    // Handle the special case for reflection
+    if (ret.R.determinant() < 0) {
+        V.col(1) *= -1;
+        ret.R = V * Ut;
+    }
+
+    // Calculate the translation vector
+    ret.t = -ret.R * centroid_A + centroid_B;
+
+    return ret;
+}
+
 [[nodiscard]] auto extract_cylinder(const pcl::PointCloud<pcl::PointXYZRGB>& cloud)
         -> std::tuple<nova::Vec4f, pcl::PointCloud<pcl::PointXYZRGB>, std::vector<nova::Vec3f>>
 {
