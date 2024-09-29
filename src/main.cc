@@ -6,8 +6,10 @@
 #include <fmt/chrono.h>
 #include <fmt/format.h>
 #include <nova/io.h>
+#include <range/v3/view/enumerate.hpp>
 #include <spdlog/spdlog.h>
 
+#include <charconv>
 #include <chrono>
 #include <filesystem>
 #include <future>
@@ -38,7 +40,7 @@ std::pair<std::vector<nova::Vec4f>, std::vector<nova::Vec4f>> pairing(const std:
         // std::cout << std::endl;
     // }
 
-    for (const auto& [idx, vec] : std::views::enumerate(dist_mx)) {
+    for (const auto& [idx, vec] : ranges::views::enumerate(dist_mx)) {
         const auto& min = std::ranges::min(vec);
         const auto idx_b = std::distance(vec.begin(), std::ranges::find(vec, min));
 
@@ -83,7 +85,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char *argv[]) {
     std::vector<nova::Vec4f> prev_cyl_params;
     Eigen::Matrix3f trafo = Eigen::Matrix3f::Identity();
 
-    for (const auto& [idx, cloud] : std::views::enumerate(clouds)) {
+    for (const auto& [idx, cloud] : ranges::views::enumerate(clouds)) {
         logging::debug("Cloud size: {}", cloud.size());
 
         const auto start = nova::now();

@@ -11,6 +11,9 @@
 #include "utils.hh"
 
 #include <nova/json.h>
+#include <range/v3/algorithm/contains.hpp>
+#include <range/v3/view/enumerate.hpp>
+#include <range/v3/view/zip.hpp>
 #ifdef ROS2_BUILD
 #include <rclcpp/duration.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -94,7 +97,7 @@ public:
 
         orientations.push_back(orientations.back());
 
-        const auto poses = std::views::zip(m_path, orientations)
+        const auto poses = ranges::views::zip(m_path, orientations)
                          | std::views::transform([](const auto& elem) { const auto& [pos, theta] = elem; return pose{ pos, nova::Vec3f{ 0, 0, theta } }; })
                          | ranges::to<std::vector>();
 
@@ -133,7 +136,7 @@ public:
         auto ts = rclcpp::Clock().now();
 #endif
 
-        for (const auto& [i, pose] : std::views::enumerate(sparse_poses)) {
+        for (const auto& [i, pose] : ranges::views::enumerate(sparse_poses)) {
             m_lidar.move({ pose.position.x(), pose.position.y(), m_lidar.pos().z() });
             const auto data = m_lidar.scan(m_objects, pose.orientation.z())
                             | std::views::transform([pose](const auto& elem) { return nova::Vec3f{ elem.x() - pose.position.x(), elem.y() - pose.position.y(), elem.z() }; })
@@ -190,13 +193,13 @@ private:
                        | std::views::transform([](const auto& elem) { return elem.y(); })
                        | ranges::to<std::vector>();
 
-        for (const auto& [x, y] : std::views::zip(_xs, _ys)) {
+        for (const auto& [x, y] : ranges::views::zip(_xs, _ys)) {
             logging::debug("x={}\ty={}", x, y);
         }
 
         const auto [xs, ys, dxs, dys, ddxs, ddys] = interpolate_and_differentiate(_xs, _ys, m_config.lookup<std::size_t>("simulation.path.num_interp_points"));
 
-        const auto path = std::views::zip(xs, ys)
+        const auto path = ranges::views::zip(xs, ys)
                         | std::views::transform([](const auto& elem) { const auto& [x, y] = elem; return nova::Vec3f{ x, y, 0 }; })
                         | ranges::to<std::vector>();
 
@@ -246,7 +249,7 @@ private:
                 const auto dist_before = distance - (data[i] - data[i - 1]).length();
                 std::size_t idx;
 
-                if (not std::ranges::contains(ret, data[i - 1])) {
+                if (not ranges::contains(ret, data[i - 1])) {
                     _distances[indices.back()] = _distances[indices.back()] - dist_before < distance - _distances[indices.back()] ? dist_before : distance;
                     ret.push_back(_distances[indices.back()] - dist_before <= distance - _distances[indices.back()] ? data[i - 1] : data[i]);
                     idx = _distances[indices.back()] - dist_before <= distance - _distances[indices.back()] ? i - 1 : i;
